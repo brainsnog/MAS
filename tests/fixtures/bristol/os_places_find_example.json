@@ -1,0 +1,31 @@
+{
+  "_fixture_note": "Illustrative shape based on the published OS Places API technical spec, NOT a captured live response. Replace with a real captured fixture in Sprint 0 once OS_PLACES_API_KEY is available in the Codespace.",
+  "header": {
+    "uri": "https://api.os.uk/search/places/v1/find",
+    "query": "1 Example Street, Bristol",
+    "offset": 0,
+    "totalresults": 1,
+    "format": "JSON",
+    "dataset": "DPA",
+    "maxresults": 1
+  },
+  "results": [
+    {
+      "DPA": {
+        "UPRN": "10009999999",
+        "UDPRN": "20009999",
+        "ADDRESS": "1, EXAMPLE STREET, BRISTOL, BS1 1AA",
+        "BUILDING_NUMBER": "1",
+        "THOROUGHFARE_NAME": "EXAMPLE STREET",
+        "POST_TOWN": "BRISTOL",
+        "POSTCODE": "BS1 1AA",
+        "X_COORDINATE": 358123.0,
+        "Y_COORDINATE": 172456.0,
+        "LNG": -2.5975,
+        "LAT": 51.4536,
+        "CLASSIFICATION_CODE": "RD",
+        "CLASSIFICATION_CODE_DESCRIPTION": "Dwelling"
+      }
+    }
+  ]
+}

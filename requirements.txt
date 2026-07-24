@@ -1,0 +1,33 @@
+# Core
+httpx>=0.27
+python-dotenv>=1.0
+pydantic>=2.0
+
+# GIS
+geopandas>=0.14
+shapely>=2.0
+pyproj>=3.6
+
+# PDF extraction
+pymupdf>=1.24
+
+# HTML parsing
+beautifulsoup4>=4.12
+lxml>=5.0
+
+# LLM (Gemini — primary)
+google-generativeai>=0.5
+
+# LLM comparison experiment (Sprint 5 only — Groq)
+groq>=0.9
+
+# PDF report generation
+reportlab>=4.0
+# weasyprint>=61  # alternative to reportlab — pick one in Sprint 4
+
+# Demo UI
+gradio>=4.0
+
+# Testing
+pytest>=8.0
+pytest-asyncio>=0.23
