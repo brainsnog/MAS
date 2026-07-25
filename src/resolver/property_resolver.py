@@ -4,8 +4,24 @@ code. Does NOT return a property boundary polygon — see VERIFICATION STATUS
 below for why.
 
 Sources:
-  - OS Places API (DPA dataset)  -> UPRN, X/Y (BNG), LAT/LNG (WGS84)
+  - OS Places API (DPA dataset)  -> UPRN, X/Y (BNG), LAT/LNG (WGS84), match score
   - planning.data.gov.uk /entity -> local-authority-district (point lookup)
+
+MATCH CONFIDENCE (added 2026-07-25):
+`ResolvedProperty.match_score` / `match_description` surface OS Places API's
+own `MATCH` (0-1 float) and `MATCH_DESCRIPTION` fields. This matters because
+`resolve()` always returns `results[0]` — the single best candidate — with no
+guarantee it's the *right* one. Confirmed on a real call: searching
+"14 Amhurst Road, London E8 1LL" returned UPRN 10008231087, "41, AMHURST ROAD,
+LONDON, E8 1LL" — a different, real property on the same street and postcode,
+NOT number 14 (which doesn't exist) — and OS Places still labelled it
+MATCH_DESCRIPTION: "GOOD" (score 0.8). A "GOOD" description does not mean the
+returned address is the same one that was asked for at the house-number
+level. Callers (the CLI, the orchestrator, the eventual Gradio UI) must check
+match_score/match_description themselves and decide whether to warn a user or
+require confirmation on anything below a high-confidence threshold — this
+resolver surfaces the signal but does not itself decide what counts as "close
+enough".
 
 VERIFICATION STATUS (checked against https://www.planning.data.gov.uk/docs, 2026-07-25):
 - `entity.json?latitude=..&longitude=..&dataset=local-authority-district` IS the
@@ -50,6 +66,8 @@ class ResolvedProperty:
     x_coordinate: float
     y_coordinate: float
     postcode: Optional[str]
+    match_score: Optional[float] = None
+    match_description: Optional[str] = None
     local_authority_code: Optional[str] = None
     # Not sourced by this resolver — see Architecture Decisions & Changes,
     # 2026-07-25, in CON29_ROADMAP_v2.md. No free/open source of a property's
@@ -60,7 +78,19 @@ class ResolvedProperty:
 
 
 async def _call_os_places_find(address: str, api_key: str) -> dict:
-    params = {"query": address, "key": api_key, "dataset": "DPA", "maxresults": 1}
+    # output_srs=WGS84 is required, not optional: OS Places API defaults to
+    # EPSG:27700 (British National Grid, X/Y only) and omits LAT/LNG entirely
+    # unless WGS84 output is explicitly requested. Without this, every real
+    # call returns a DPA record with no LAT/LNG field, and resolve() below
+    # would raise ResolverServiceError on every genuine address. Confirmed
+    # against a real API response on 2026-07-25 — see Troubleshooting Log.
+    params = {
+        "query": address,
+        "key": api_key,
+        "dataset": "DPA",
+        "maxresults": 1,
+        "output_srs": "WGS84",
+    }
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             resp = await client.get(OS_PLACES_BASE_URL, params=params)
@@ -137,6 +167,8 @@ async def resolve(address: str) -> ResolvedProperty:
     y_coord = dpa.get("Y_COORDINATE")
     postcode = dpa.get("POSTCODE")
     matched_address = dpa.get("ADDRESS", address)
+    match_score = dpa.get("MATCH")
+    match_description = dpa.get("MATCH_DESCRIPTION")
 
     if uprn is None or lat is None or lon is None:
         raise ResolverServiceError(
@@ -153,6 +185,8 @@ async def resolve(address: str) -> ResolvedProperty:
         x_coordinate=float(x_coord) if x_coord is not None else None,
         y_coordinate=float(y_coord) if y_coord is not None else None,
         postcode=postcode,
+        match_score=float(match_score) if match_score is not None else None,
+        match_description=match_description,
         local_authority_code=local_authority_code,
         polygon_wkt=None,
     )

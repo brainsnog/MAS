@@ -1,31 +1,54 @@
 {
-  "_fixture_note": "Illustrative shape based on the published OS Places API technical spec, NOT a captured live response. Replace with a real captured fixture in Sprint 0 once OS_PLACES_API_KEY is available in the Codespace (see README note at bottom of test_resolver.py on how to capture it).",
-  "header": {
-    "uri": "https://api.os.uk/search/places/v1/find",
-    "query": "14 Amhurst Road, Hackney, London",
-    "offset": 0,
-    "totalresults": 1,
-    "format": "JSON",
-    "dataset": "DPA",
-    "maxresults": 1
+  "_fixture_note": "REAL captured response, 2026-07-25. Query: '14 Amhurst Road, London E8 1LL'. IMPORTANT: this is the exact fictional example address from CON29_ROADMAP_v2.md's own Evidence Manifest Schema -- number 14 does not exist on this street. OS Places API correctly returned its best real candidate on the same street/postcode instead (number 41), scored MATCH_DESCRIPTION: GOOD (0.8) despite being a different house number. This is kept deliberately as the Hackney fixture BECAUSE it demonstrates why match_score/match_description must be surfaced and checked by callers -- a 'GOOD' label does not guarantee house-number-level identity. Do not use this UPRN as a real Sprint 2 test property; it was never a genuine test address, just the roadmap's illustrative one.",
+  "header" : {
+    "uri" : "https://api.os.uk/search/places/v1/find?query=14%20Amhurst%20Road%2C%20London%20E8%201LL&dataset=DPA&maxresults=1&output_srs=WGS84",
+    "query" : "query=14 Amhurst Road, London E8 1LL",
+    "offset" : 0,
+    "totalresults" : 11577965,
+    "format" : "JSON",
+    "dataset" : "DPA",
+    "lr" : "EN,CY",
+    "maxresults" : 1,
+    "matchprecision" : 1,
+    "epoch" : "128",
+    "lastupdate" : "2026-07-24",
+    "output_srs" : "WGS84"
   },
-  "results": [
-    {
-      "DPA": {
-        "UPRN": "100021234567",
-        "UDPRN": "20087654",
-        "ADDRESS": "14, AMHURST ROAD, LONDON, E8 1LL",
-        "BUILDING_NUMBER": "14",
-        "THOROUGHFARE_NAME": "AMHURST ROAD",
-        "POST_TOWN": "LONDON",
-        "POSTCODE": "E8 1LL",
-        "X_COORDINATE": 534567.0,
-        "Y_COORDINATE": 185432.0,
-        "LNG": -0.0615,
-        "LAT": 51.5462,
-        "CLASSIFICATION_CODE": "RD",
-        "CLASSIFICATION_CODE_DESCRIPTION": "Dwelling"
-      }
+  "results" : [ {
+    "DPA" : {
+      "UPRN" : "10008231087",
+      "UDPRN" : "7962698",
+      "ADDRESS" : "41, AMHURST ROAD, LONDON, E8 1LL",
+      "BUILDING_NUMBER" : "41",
+      "THOROUGHFARE_NAME" : "AMHURST ROAD",
+      "POST_TOWN" : "LONDON",
+      "POSTCODE" : "E8 1LL",
+      "RPC" : "1",
+      "X_COORDINATE" : 534786.0,
+      "Y_COORDINATE" : 185020.0,
+      "LNG" : -0.0574934,
+      "LAT" : 51.547983,
+      "STATUS" : "APPROVED",
+      "LOGICAL_STATUS_CODE" : "1",
+      "CLASSIFICATION_CODE" : "RD04",
+      "CLASSIFICATION_CODE_DESCRIPTION" : "Terraced",
+      "LOCAL_CUSTODIAN_CODE" : 5360,
+      "LOCAL_CUSTODIAN_CODE_DESCRIPTION" : "LONDON BOROUGH OF HACKNEY",
+      "COUNTRY_CODE" : "E",
+      "COUNTRY_CODE_DESCRIPTION" : "This record is within England",
+      "POSTAL_ADDRESS_CODE" : "D",
+      "POSTAL_ADDRESS_CODE_DESCRIPTION" : "A record which is linked to PAF",
+      "BLPU_STATE_CODE" : "2",
+      "BLPU_STATE_CODE_DESCRIPTION" : "In use",
+      "TOPOGRAPHY_LAYER_TOID" : "osgb1000006191910",
+      "WARD_CODE" : "E05009372",
+      "LAST_UPDATE_DATE" : "10/02/2016",
+      "ENTRY_DATE" : "14/02/2006",
+      "BLPU_STATE_DATE" : "07/07/2009",
+      "LANGUAGE" : "EN",
+      "MATCH" : 0.8,
+      "MATCH_DESCRIPTION" : "GOOD",
+      "DELIVERY_POINT_SUFFIX" : "1Q"
     }
-  ]
+  } ]
 }
