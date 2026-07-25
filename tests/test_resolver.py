@@ -63,6 +63,64 @@ async def test_resolve_bristol_address_returns_uprn_and_coords(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_resolve_hackney_address_returns_uprn_and_coords(monkeypatch):
+    """
+    Sprint 0 success criteria require the resolver to work for a Hackney
+    address as well as a Bristol one (parity between the two borough case
+    studies matters for every later sprint, not just this one).
+    """
+    fixture = _load("hackney/os_places_find_example.json")
+    transport = _mock_transport(fixture)
+
+    def patched_client(*args, **kwargs):
+        kwargs.pop("transport", None)
+        return _RealAsyncClient(*args, transport=transport, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", patched_client)
+
+    result = await pr.resolve("14 Amhurst Road, Hackney, London E8 1LL")
+
+    assert result.uprn == "100021234567"
+    assert result.postcode == "E8 1LL"
+    assert result.lat == pytest.approx(51.5462)
+    assert result.lon == pytest.approx(-0.0615)
+
+
+@pytest.mark.asyncio
+async def test_resolve_populates_local_authority_code_when_match_found(monkeypatch):
+    """
+    Confirms the documented planning.data.gov.uk query shape (entity.json?
+    latitude=..&longitude=..&dataset=local-authority-district) as verified
+    against https://www.planning.data.gov.uk/docs on 2026-07-25 — see
+    Architecture Decisions & Changes.
+    """
+    fixture = _load("bristol/os_places_find_example.json")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "api.os.uk" in str(request.url):
+            return httpx.Response(200, json=fixture)
+        if "planning.data.gov.uk" in str(request.url):
+            assert "latitude" in str(request.url)
+            assert "longitude" in str(request.url)
+            return httpx.Response(200, json={
+                "entities": [{"reference": "bristol", "name": "Bristol, City of"}]
+            })
+        raise AssertionError(f"Unexpected request to {request.url}")
+
+    transport = httpx.MockTransport(handler)
+
+    def patched_client(*args, **kwargs):
+        kwargs.pop("transport", None)
+        return _RealAsyncClient(*args, transport=transport, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", patched_client)
+
+    result = await pr.resolve("1 Example Street, Bristol")
+
+    assert result.local_authority_code == "bristol"
+
+
+@pytest.mark.asyncio
 async def test_resolve_not_found_raises_property_not_found_error(monkeypatch):
     transport = _mock_transport({"results": []})
 

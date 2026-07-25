@@ -1,21 +1,24 @@
 """
-Property resolver: free-text address -> UPRN, coordinates, boundary polygon,
-local authority code.
+Property resolver: free-text address -> UPRN, coordinates, local authority
+code. Does NOT return a property boundary polygon — see VERIFICATION STATUS
+below for why.
 
 Sources:
   - OS Places API (DPA dataset)  -> UPRN, X/Y (BNG), LAT/LNG (WGS84)
-  - planning.data.gov.uk /entity -> local-authority-district, boundary polygon (WKT)
+  - planning.data.gov.uk /entity -> local-authority-district (point lookup)
 
-NOTE ON VERIFICATION NEEDED (flagging honestly rather than guessing):
-planning.data.gov.uk's spatial/point-based query parameters (e.g. searching
-"which local-authority-district / boundary entity contains this point") were
-not confirmed against live docs while writing this — the entity search
-endpoint's documented params (q, typology, dataset, organisation_entity, entity,
-curie, prefix, reference, period, start_date_year...) were captured from a
-partial doc view. Confirm the exact parameter name for point-in-polygon /
-longitude-latitude search against https://www.planning.data.gov.uk/docs before
-trusting the boundary lookup below in production. The OS Places API call is
-based on the current published technical spec and should be reliable as written.
+VERIFICATION STATUS (checked against https://www.planning.data.gov.uk/docs, 2026-07-25):
+- `entity.json?latitude=..&longitude=..&dataset=local-authority-district` IS the
+  documented point-intersection query shape. `_lookup_local_authority` below is
+  correct as written.
+- There is no `boundary` dataset on planning.data.gov.uk, and no free/open
+  source of a property's own parcel polygon generally (that's HMLR's licensed
+  INSPIRE Index Polygons product). RESOLVED 2026-07-25 (see Architecture
+  Decisions & Changes in CON29_ROADMAP_v2.md): the resolver no longer attempts
+  to source a polygon. `polygon_wkt` is retained on `ResolvedProperty` as an
+  always-None field for now. Sprint 1's `planning_agent.py` must query
+  planning.data.gov.uk by point (lat/lon) intersection instead of assuming a
+  pre-built property polygon — flagged there too, not yet built.
 """
 
 from __future__ import annotations
@@ -48,6 +51,11 @@ class ResolvedProperty:
     y_coordinate: float
     postcode: Optional[str]
     local_authority_code: Optional[str] = None
+    # Not sourced by this resolver — see Architecture Decisions & Changes,
+    # 2026-07-25, in CON29_ROADMAP_v2.md. No free/open source of a property's
+    # own parcel polygon exists (that's HMLR's licensed INSPIRE Index Polygons).
+    # Downstream agents query planning.data.gov.uk by point (lat/lon) instead.
+    # Kept as a field in case a licensed polygon source is added later.
     polygon_wkt: Optional[str] = None
 
 
@@ -78,10 +86,10 @@ async def _lookup_local_authority(lat: float, lon: float) -> Optional[str]:
     """
     Look up the local-authority-district entity containing this point.
 
-    See module docstring — the exact planning.data.gov.uk parameter for a
-    point-based spatial query should be confirmed against live docs. Falls
-    back to None (not a crash) if the lookup fails, per the roadmap's
-    "resolver handles failure gracefully" success criterion.
+    Query shape confirmed against https://www.planning.data.gov.uk/docs,
+    2026-07-25 — see module docstring. Falls back to None (not a crash) if
+    the lookup fails, per the roadmap's "resolver handles failure gracefully"
+    success criterion.
     """
     params = {
         "dataset": "local-authority-district",
@@ -101,32 +109,17 @@ async def _lookup_local_authority(lat: float, lon: float) -> Optional[str]:
     return None
 
 
-async def _lookup_boundary_polygon(uprn: str) -> Optional[str]:
-    """Look up the boundary/parcel polygon (WKT) for a UPRN, where available."""
-    params = {"dataset": "boundary", "q": uprn}
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            resp = await client.get(PLANNING_DATA_BASE_URL, params=params)
-            resp.raise_for_status()
-            payload = resp.json()
-            entities = payload.get("entities") or payload.get("results") or []
-            if entities:
-                return entities[0].get("geometry")
-        except (httpx.RequestError, httpx.HTTPStatusError, ValueError, KeyError):
-            return None
-    return None
-
-
 async def resolve(address: str) -> ResolvedProperty:
     """
-    Resolve a free-text UK property address to UPRN, coordinates, local
-    authority code, and boundary polygon (where available).
+    Resolve a free-text UK property address to UPRN, coordinates, and local
+    authority code. `polygon_wkt` on the result is always None — see module
+    docstring VERIFICATION STATUS for why.
 
     Raises PropertyNotFoundError if the address cannot be matched.
     Raises ResolverServiceError on unexpected upstream failure.
-    Never raises on missing local_authority_code / polygon_wkt — those degrade
-    to None rather than failing the whole resolution, since downstream agents
-    can still operate on UPRN + coordinates alone.
+    Never raises on missing local_authority_code — it degrades to None rather
+    than failing the whole resolution, since downstream agents can still
+    operate on UPRN + coordinates alone.
     """
     api_key = os.environ.get("OS_PLACES_API_KEY")
     if not api_key:
@@ -151,7 +144,6 @@ async def resolve(address: str) -> ResolvedProperty:
         )
 
     local_authority_code = await _lookup_local_authority(lat, lon)
-    polygon_wkt = await _lookup_boundary_polygon(uprn)
 
     return ResolvedProperty(
         uprn=str(uprn),
@@ -162,5 +154,5 @@ async def resolve(address: str) -> ResolvedProperty:
         y_coordinate=float(y_coord) if y_coord is not None else None,
         postcode=postcode,
         local_authority_code=local_authority_code,
-        polygon_wkt=polygon_wkt,
+        polygon_wkt=None,
     )

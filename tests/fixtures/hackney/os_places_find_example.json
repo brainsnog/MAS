@@ -1,0 +1,31 @@
+{
+  "_fixture_note": "Illustrative shape based on the published OS Places API technical spec, NOT a captured live response. Replace with a real captured fixture in Sprint 0 once OS_PLACES_API_KEY is available in the Codespace (see README note at bottom of test_resolver.py on how to capture it).",
+  "header": {
+    "uri": "https://api.os.uk/search/places/v1/find",
+    "query": "14 Amhurst Road, Hackney, London",
+    "offset": 0,
+    "totalresults": 1,
+    "format": "JSON",
+    "dataset": "DPA",
+    "maxresults": 1
+  },
+  "results": [
+    {
+      "DPA": {
+        "UPRN": "100021234567",
+        "UDPRN": "20087654",
+        "ADDRESS": "14, AMHURST ROAD, LONDON, E8 1LL",
+        "BUILDING_NUMBER": "14",
+        "THOROUGHFARE_NAME": "AMHURST ROAD",
+        "POST_TOWN": "LONDON",
+        "POSTCODE": "E8 1LL",
+        "X_COORDINATE": 534567.0,
+        "Y_COORDINATE": 185432.0,
+        "LNG": -0.0615,
+        "LAT": 51.5462,
+        "CLASSIFICATION_CODE": "RD",
+        "CLASSIFICATION_CODE_DESCRIPTION": "Dwelling"
+      }
+    }
+  ]
+}

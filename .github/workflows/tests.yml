@@ -1,0 +1,28 @@
+name: Tests
+
+# Runs automatically on every push and PR. Uses GitHub Actions' own free-tier
+# runner minutes — completely separate from, and does not consume, Codespaces
+# hours. Only installs what tests/test_resolver.py actually needs (not the
+# full requirements.txt, which includes heavier GIS/PDF/LLM deps not
+# relevant to Sprint 0's mocked, network-free tests) to keep runs fast.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install httpx pytest pytest-asyncio pydantic
+
+      - name: Run tests
+        run: pytest tests/ -v
