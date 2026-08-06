@@ -24,3 +24,17 @@ the handoff wins and says so explicitly.
 - Update the Project Log and Deviation Log at the end of every session.
 - Do not reason about the dissertation, word counts, or the presentation.
   This repo is the build only.
+- Never hardcode an expected value in verification code. If you are measuring
+  something, derive it. Code written to produce an expected number is not a
+  measurement.
+- Read a dataclass or schema before writing code against it. Never guess an
+  attribute name or use hasattr to hedge between two guesses.
+- Never install packages ad hoc. Install only from requirements.txt and
+  requirements-dev.txt. If something is missing, add it to the correct file.
+- Reuse what exists. con29_registry.py has top_level_groups() and by_bucket();
+  scripts/tally_sprint1_coverage.py already derives reachability from adapters.
+  Do not reimplement with regex.
+- Build and test against tests/fixtures/discovery/. Do not make live calls to
+  council servers during development.
+- Pipelines mask exit codes. Use set -o pipefail or drop the pipe.
+- Show me your plan before implementing. One work package at a time.
