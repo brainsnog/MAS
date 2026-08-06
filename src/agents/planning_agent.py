@@ -2,9 +2,11 @@
 Planning Data Agent — queries planning.data.gov.uk BY POINT across every
 dataset relevant to Sprint 1's Bucket-1 CON29 coverage.
 
-Covers CON29 questions per CON29_ROADMAP_v2.md Sprint 1 §C (corrected
-2026-07-25): 1.1a-g, 1.2, 1.1h, 3.7, 3.5 (cross-check with Historic England),
-3.13 (partial), 3.11.
+Covers CON29 questions 1.1a-f, 1.2, 3.9(m), 3.9(a), 3.5 (cross-check with
+Historic England), 3.13 (partial), 3.11 — see RESOLVED 2026-08-03 below for
+what changed from the original Sprint 1 assumptions. Also queries
+article-4-direction, which does NOT map to a CON29 question — see
+NON_CON29_DATASETS.
 
 ARCHITECTURE NOTE (2026-07-25): queries by POINT (latitude/longitude), not
 polygon — see Architecture Decisions & Changes: there is no boundary/polygon
@@ -13,18 +15,28 @@ parcel polygon. This reuses the exact query shape already confirmed correct
 in property_resolver.py's _lookup_local_authority
 (dataset=X&longitude=..&latitude=..).
 
-ON THE 1.1h/ARTICLE-4 OVERLAP WITH BUCKET 2 (not a bug, a deliberate note):
-CON29_ROADMAP_v2.md's own field classification table lists Article 4
-directions (1.1h-i) under Bucket 2 (agent_navigated / council website), yet
-this Sprint 1 agent also queries planning.data.gov.uk's
-"article-4-direction" dataset for the same question. This is consistent
-with the system's own source-reliability hierarchy (try the highest-tier
-source first, fall back to lower tiers): if the national dataset happens to
-have this council's Article 4 data, that's a genuine Bucket-1-quality hit;
-if it comes back empty, that does NOT mean no Article 4 direction exists —
-it means fall through to the council-website / Bucket 2 path, which isn't
-built by this agent. Downstream (normalisation / mapper) needs to treat an
-empty result here as "not found in this source", not "confirmed absent".
+RESOLVED 2026-08-03 — TPO/ARTICLE-4/ENFORCEMENT NUMBERING (previously
+flagged in CON29_ROADMAP_v2.md's Current State, held pending confirmation,
+after con29_registry.py was rebuilt 2026-08-02 against a real St Albans
+CON29R/LLC1 exemplar):
+  - Tree preservation orders are real-form 3.9(m), not a standalone "3.7".
+  - Enforcement notices are real-form 3.9(a), not "1.1g" as previously
+    assumed (real 1.1g is "a heritage partnership agreement" — a
+    genuinely different, much rarer thing, for which this agent currently
+    has no automated source; left uncovered rather than force-mapped).
+  - "planning-application" now maps only to 1.1a-f (planning permission,
+    listed building consent, conservation area consent, and the three
+    certificate-of-lawfulness variants) — all things a general planning
+    application record plausibly represents. 1.1g is deliberately absent
+    from this tuple, not silently folded in.
+  - Article 4 directions have no standalone CON29 Part 1 question number in
+    the real form at all (plausibly an LLC1 Part 1 charge instead — see
+    NON_CON29_DATASETS). The dataset is still queried (real, useful
+    evidence-manifest content), just not claimed to answer a CON29Field.
+  The previous "ON THE 1.1h/ARTICLE-4 OVERLAP" note below described a
+  design that turned out to rest on a wrong premise (that 1.1h was Article
+  4) — replaced by the note above rather than left in place with a caveat
+  bolted on, since the entire premise, not just a detail, was wrong.
 
 VERIFICATION GAP: entities are passed through largely as-is (whatever keys
 planning.data.gov.uk returns per entity — reference, name, entry-date, etc.)
@@ -32,12 +44,6 @@ rather than parsed field-by-field, since the exact extra fields available
 per dataset (e.g. a planning application's decision outcome) were not
 confirmed against live docs. That interpretation is Sprint 1 §D
 (normalisation layer) or Sprint 3 (mapper)'s job, not this agent's.
-
-Minor note, not a bug: the roadmap's own Sprint 1 §C table lists 1.1g under
-BOTH "planning-application" and "enforcement-notice" datasets. Kept faithful
-to that as written; the normalisation layer may see the same question
-answered from two datasets and should treat that as corroborating evidence,
-not a conflict to flag.
 """
 
 from __future__ import annotations
@@ -50,17 +56,42 @@ import httpx
 
 PLANNING_DATA_BASE_URL = "https://www.planning.data.gov.uk/entity.json"
 
-# dataset -> CON29 question IDs it primarily (or opportunistically, for
-# 1.1h — see module docstring) answers, per CON29_ROADMAP_v2.md Sprint 1 §C.
+# dataset -> CON29 question IDs it answers, per con29_registry.py (rebuilt
+# 2026-08-02 against a real exemplar — see module docstring RESOLVED
+# 2026-08-03). article-4-direction is deliberately NOT here — see
+# NON_CON29_DATASETS. 1.1g (heritage partnership agreement) currently has
+# no automated source at all and is not claimed by any dataset below.
 DATASET_TO_QUESTIONS: dict[str, tuple[str, ...]] = {
-    "planning-application": ("1.1a", "1.1b", "1.1c", "1.1d", "1.1e", "1.1f", "1.1g"),
+    "planning-application": ("1.1a", "1.1b", "1.1c", "1.1d", "1.1e", "1.1f"),
     "conservation-area": ("1.2", "3.11"),
-    "article-4-direction": ("1.1h",),
-    "tree-preservation-order": ("3.7",),
+    "tree-preservation-order": ("3.9m",),
     "listed-building": ("3.5",),
-    "enforcement-notice": ("1.1g",),
+    "enforcement-notice": ("3.9a",),
     "brownfield-land": ("3.13",),
 }
+
+# Datasets this agent queries that do NOT answer a numbered CON29 Part 1
+# question — kept separate from DATASET_TO_QUESTIONS rather than mapped to
+# a guessed ID, same "flag, don't invent" discipline as con29_registry.py's
+# UNCONFIRMED_NUMBERING list and gis_agent.py's own NON_CON29_DATASETS.
+NON_CON29_DATASETS: dict[str, str] = {
+    "article-4-direction": (
+        "No standalone CON29 Part 1 question for Article 4 directions was "
+        "found in the real St Albans exemplar (2026-08-02) — plausibly an "
+        "LLC1 Part 1 charge (Local Land Charges Rules 1977) rather than a "
+        "CON29 enquiry. Still queried for evidence-manifest purposes; "
+        "Sprint 3's CON29 Mapper must not map it onto any CON29Field until "
+        "this is confirmed one way or the other."
+    ),
+}
+
+# Every dataset this agent actually queries — the union of
+# DATASET_TO_QUESTIONS (maps onto a confirmed CON29 question) and
+# NON_CON29_DATASETS (queried anyway, for evidence-manifest completeness).
+# get_planning_data() iterates this, NOT DATASET_TO_QUESTIONS directly, so
+# moving article-4-direction out of the question-mapping dict doesn't stop
+# it being fetched.
+ALL_DATASETS: tuple[str, ...] = tuple(DATASET_TO_QUESTIONS) + tuple(NON_CON29_DATASETS)
 
 
 @dataclass
@@ -109,12 +140,14 @@ async def _query_dataset(
 
 async def get_planning_data(lat: float, lon: float) -> PlanningDataResult:
     """
-    Query every dataset in DATASET_TO_QUESTIONS by point (lat/lon), in
-    parallel. Never raises — see DatasetResult.error / failed_datasets().
+    Query every dataset in ALL_DATASETS by point (lat/lon), in parallel —
+    this includes both DATASET_TO_QUESTIONS (maps onto a CON29 question) and
+    NON_CON29_DATASETS (queried anyway, doesn't map onto one — see module
+    docstring). Never raises — see DatasetResult.error / failed_datasets().
     """
     async with httpx.AsyncClient(timeout=10.0) as client:
         dataset_results = await asyncio.gather(
-            *[_query_dataset(client, dataset, lat, lon) for dataset in DATASET_TO_QUESTIONS]
+            *[_query_dataset(client, dataset, lat, lon) for dataset in ALL_DATASETS]
         )
 
     return PlanningDataResult(

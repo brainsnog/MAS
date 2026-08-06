@@ -27,7 +27,8 @@ Borough = Literal["bristol", "hackney"]
 class PropertyRecord:
     borough: Borough
 
-    # --- Planning applications & enforcement (1.1a-g) ---
+    # --- Planning applications & enforcement (1.1a-f; enforcement notices
+    # are real-form 3.9(a) — see planning_agent.py RESOLVED 2026-08-03) ---
     planning_applications: list[dict] = field(default_factory=list)
     planning_enforcement_notices: list[dict] = field(default_factory=list)
 
@@ -35,19 +36,23 @@ class PropertyRecord:
     conservation_area: bool = False
     conservation_area_name: Optional[str] = None
 
-    # --- Article 4 direction (1.1h) ---
-    # None (NOT False) means "not found in this source" — not "confirmed
-    # absent". See planning_agent.py's module docstring: the roadmap's own
-    # classification puts Article 4 in Bucket 2 (council website); this
-    # agent's planning.data.gov.uk check is opportunistic best-tier-first,
-    # not authoritative. Only True here is a confident answer — callers
-    # (eventually Sprint 3's mapper) must not treat None as a confirmed No.
+    # --- Article 4 direction ---
+    # RESOLVED 2026-08-03: Article 4 directions have no standalone CON29
+    # Part 1 question number in the real form (con29_registry.py, rebuilt
+    # 2026-08-02 against a real exemplar) — plausibly an LLC1 Part 1 charge
+    # instead. See planning_agent.py's / gis_agent.py's NON_CON29_DATASETS.
+    # None (NOT False) still means "not found in this source" — not
+    # "confirmed absent". Sprint 3's mapper must not map this field onto any
+    # CON29Field until the LLC1-vs-CON29 question is resolved.
     article_4_direction: Optional[bool] = None
 
-    # --- Tree preservation order (3.7) ---
-    # Bucket 1 (auto) per the roadmap's own classification — no equivalent
-    # ambiguity to Article 4's above. True/False here is treated as a real
-    # (if imperfect) answer, not "unconfirmed either way".
+    # --- Tree preservation order (3.9m) ---
+    # RESOLVED 2026-08-03: real-form 3.9(m), a sub-item of "Notices, orders,
+    # directions and proceedings under Planning Acts" — not a standalone
+    # "3.7" as originally assumed (real 3.7 is "Outstanding Notices",
+    # unrelated). Bucket 1 (auto) unchanged — no equivalent ambiguity to
+    # Article 4's above. True/False here is treated as a real (if
+    # imperfect) answer, not "unconfirmed either way".
     tree_preservation_order: bool = False
 
     # --- Listed building (3.5) — cross-checked between two sources, per
