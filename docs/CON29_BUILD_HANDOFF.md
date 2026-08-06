@@ -286,7 +286,9 @@ Only `hmlr_llc1.py` records a retrieval timestamp. No agent captures the resolve
 
 ### DEF-05 — `DEFAULT_BUFFER_METRES` produces false positives — S1
 
-`gis_agent.py` applies a single hardcoded buffer to all layers. Confirmed live: a 50m buffer on Bristol planning applications returned four neighbouring properties alongside the subject; `distance=0` returned only the subject. The same applied to conservation areas (two areas at 50m, one at 0m).
+`gis_agent.py` applies a single hardcoded buffer to all layers. Confirmed live: a 50m buffer on Bristol planning applications returned 50 features across 19 distinct addresses, only one of which is the subject property (`exceededTransferLimit` is absent from that response, so 50 is the true count, not a transfer-limit truncation artefact); `distance=0` returned only the subject, 15 applications. The same applied to conservation areas (two areas at 50m, one at 0m).
+
+The inverse also holds, and the fix must account for it, not just the direction above. Rights of way is a polyline layer: `distance=0` returns 0 features, a 50m buffer returns 1. Setting every layer to zero would fix 1.1's false positive but break CON29 2.2-2.5 outright.
 
 Reporting a neighbour's planning history on a CON29 is a false positive with legal consequences.
 
@@ -470,3 +472,4 @@ These are the user's, not Claude Code's. Flag rather than assume.
 | Date | Work package | Issue | Resolution |
 |---|---|---|---|
 | 2026-08-06 | Verification (pre-WP-01) | Section 1's "14 of 63 architecturally wired" was an arithmetic error — the functional adjustment (subtracting the four rights-of-way stub IDs 2.2-2.5) had been applied to the architectural count too. Rights of way IS architecturally wired: `gis_agent.DATASET_TO_QUESTIONS` maps it, and the explicit `unavailable_reason` stub is the graceful-degradation pattern this project mandates, not an absence of wiring. | Corrected Section 1 to 18 of 63 (29%) architecturally wired; functional stays 12 of 63 (19%). Derivation is in `scripts/verify_section1.py`, re-runnable rather than a one-off check. |
+| 2026-08-06 | Verification (pre-WP-01), DEF-05 | DEF-05's evidence said the 50m buffer "returned four neighbouring properties alongside the subject". Recounting the captured fixture directly (`bristol_planning_applications_buffer50_WRONG.json`) gives 50 features across 19 distinct addresses, not 4 — the prose understated its own evidence. `exceededTransferLimit` is absent from that response, confirming 50 is the true count, not a truncation artefact. | Corrected DEF-05's description to the real figures; added the inverse case (rights of way needs a nonzero buffer, `distance=0` returns nothing) so the fix description doesn't read as "buffer should always be zero". |

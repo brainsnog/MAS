@@ -41,3 +41,4 @@ the handoff wins and says so explicitly.
 - Never create a venv outside the repo. Never use /tmp for anything durable.
 - Use `python -m package.module` for imports. If you need PYTHONPATH to make an
   import work, the invocation is wrong.
+- Do not add Co-Authored-By trailers to commits.
