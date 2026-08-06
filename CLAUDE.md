@@ -38,3 +38,6 @@ the handoff wins and says so explicitly.
   council servers during development.
 - Pipelines mask exit codes. Use set -o pipefail or drop the pipe.
 - Show me your plan before implementing. One work package at a time.
+- Never create a venv outside the repo. Never use /tmp for anything durable.
+- Use `python -m package.module` for imports. If you need PYTHONPATH to make an
+  import work, the invocation is wrong.

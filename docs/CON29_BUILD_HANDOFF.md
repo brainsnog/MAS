@@ -25,7 +25,7 @@
 
 ## 1. Current verified state
 
-Verified by execution on 2026-08-05, not by reading documentation.
+Verified by execution 2026-08-05, sub-question figures re-verified 2026-08-06, not by reading documentation.
 
 ```
 Test suite:        59 passed in 0.31s
@@ -33,8 +33,13 @@ Registry:          63 sub-questions across 19 confirmed top-level groups
                    39 auto / 24 agent_navigated / 0 manual
                    + 3 entries in UNCONFIRMED_NUMBERING (excluded from all metrics)
 Coverage tally:    8 architectural / 6 functional groups — prints "NOT MET"
-Sub-question wiring: 14 of 63 architecturally wired (22%)
+Sub-question wiring: 18 of 63 architecturally wired (29%)
                      12 of 63 functional after the HMLR block (19%)
+                     (the two counts differ by the four rights-of-way IDs
+                     2.2-2.5, which are wired to explicit unavailable_reason
+                     stubs rather than a live source. See
+                     scripts/verify_section1.py and the 2026-08-06 Deviation
+                     Log entry.)
 ```
 
 ### What exists and works
@@ -464,4 +469,4 @@ These are the user's, not Claude Code's. Flag rather than assume.
 
 | Date | Work package | Issue | Resolution |
 |---|---|---|---|
-| | | | |
+| 2026-08-06 | Verification (pre-WP-01) | Section 1's "14 of 63 architecturally wired" was an arithmetic error — the functional adjustment (subtracting the four rights-of-way stub IDs 2.2-2.5) had been applied to the architectural count too. Rights of way IS architecturally wired: `gis_agent.DATASET_TO_QUESTIONS` maps it, and the explicit `unavailable_reason` stub is the graceful-degradation pattern this project mandates, not an absence of wiring. | Corrected Section 1 to 18 of 63 (29%) architecturally wired; functional stays 12 of 63 (19%). Derivation is in `scripts/verify_section1.py`, re-runnable rather than a one-off check. |

@@ -1,0 +1,6 @@
+# Pinned from a clean python 3.11 resolution, 2026-08-06. See DEF-12.
+# Installed on top of requirements.txt. Regenerate the same way as that file.
+
+# Testing
+pytest==9.1.1
+pytest-asyncio==1.4.0

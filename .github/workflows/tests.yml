@@ -2,9 +2,10 @@ name: Tests
 
 # Runs automatically on every push and PR. Uses GitHub Actions' own free-tier
 # runner minutes — completely separate from, and does not consume, Codespaces
-# hours. Only installs what tests/test_resolver.py actually needs (not the
-# full requirements.txt, which includes heavier GIS/PDF/LLM deps not
-# relevant to Sprint 0's mocked, network-free tests) to keep runs fast.
+# hours. Installs from requirements.txt and requirements-dev.txt, the same
+# two files a local checkout installs from — see README.md Environment. See
+# DEF-12: this previously installed a hand-picked dependency list instead,
+# so "green CI" didn't mean the same thing as "requirements.txt resolves".
 
 on:
   push:
@@ -21,8 +22,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install test dependencies
-        run: pip install httpx pytest pytest-asyncio pydantic
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run tests
         run: pytest tests/ -v
