@@ -77,10 +77,25 @@ class LLC1Result:
     borough: Borough
     uprn: str
     coverage_flag: Literal["manual", "auto"]
+    # DEF-04, scope extended 2026-08-06: renamed from retrieved_timestamp,
+    # str -> datetime, and made genuinely required (no default) — matching
+    # historic_england.py's contract exactly, one contract across all four
+    # adapters rather than two with defaults and two without. Even though
+    # this adapter never makes a real network call, both stub functions
+    # below represent a real event worth timestamping ("checked and
+    # confirmed blocked"), the same treatment as a genuine query attempt on
+    # the other three adapters. Always construct with
+    # datetime.now(timezone.utc); a dataclass field cannot enforce
+    # timezone-awareness the way CON29Field's AwareDatetime does, so a
+    # naive datetime would pass here silently and only fail later, at
+    # CON29Field construction (WP-09).
+    retrieved_at: datetime
     charges: list[LLC1Charge] = field(default_factory=list)
     source_name: str = "HM Land Registry — Local Land Charges (LLC1)"
     blocked_reason: Optional[str] = None
-    retrieved_timestamp: Optional[str] = None
+    # No source_url field, unlike the other three adapters: this is always a
+    # stub, no request is ever made, so there is no resolved request URL to
+    # capture — an absence by construction, not an oversight.
     covers_questions: tuple[str, ...] = COVERS_QUESTIONS
 
 
@@ -115,9 +130,9 @@ async def _fetch_bristol_stub(uprn: str) -> LLC1Result:
         borough="bristol",
         uprn=uprn,
         coverage_flag="manual",
+        retrieved_at=datetime.now(timezone.utc),
         charges=[],
         blocked_reason=_BRISTOL_BLOCKED_REASON,
-        retrieved_timestamp=_now_iso(),
     )
 
 
@@ -131,11 +146,7 @@ async def _fetch_hackney_stub(uprn: str) -> LLC1Result:
         borough="hackney",
         uprn=uprn,
         coverage_flag="manual",
+        retrieved_at=datetime.now(timezone.utc),
         charges=[],
         blocked_reason=_HACKNEY_BLOCKED_REASON,
-        retrieved_timestamp=_now_iso(),
     )
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

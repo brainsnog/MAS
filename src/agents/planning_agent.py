@@ -50,9 +50,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
+
+from src.disposition import DatasetStatus
+from src.redaction import redact_url
 
 PLANNING_DATA_BASE_URL = "https://www.planning.data.gov.uk/entity.json"
 
@@ -97,10 +101,22 @@ ALL_DATASETS: tuple[str, ...] = tuple(DATASET_TO_QUESTIONS) + tuple(NON_CON29_DA
 @dataclass
 class DatasetResult:
     dataset: str
+    # DEF-04: required, not Optional — every dataset in ALL_DATASETS always
+    # gets a real HTTP attempt (success or caught exception), so there is
+    # always a real retrieval moment to timestamp. Always construct with
+    # datetime.now(timezone.utc); a dataclass field cannot enforce
+    # timezone-awareness the way CON29Field's AwareDatetime does, so a
+    # naive datetime would pass here silently and only fail later, at
+    # CON29Field construction (WP-09).
+    retrieved_at: datetime
     entities: list[dict] = field(default_factory=list)
     # Populated instead of raising — see get_planning_data(). A failure on
     # one dataset must not take down the others.
     error: Optional[str] = None
+    # The actual resolved request URL, redacted per DEF-04. This source has
+    # no key/credential today (planning.data.gov.uk is keyless), so
+    # redaction is a no-op in practice — applied anyway for consistency.
+    source_url: Optional[str] = None
 
 
 @dataclass
@@ -113,8 +129,18 @@ class PlanningDataResult:
         r = self.results.get(dataset)
         return r.entities if r else []
 
-    def has_any(self, dataset: str) -> bool:
-        return len(self.entities_for(dataset)) > 0
+    def status_for(self, dataset: str) -> DatasetStatus:
+        """
+        DEF-02: tri-state, replacing has_any(). "positive"/"negative" are
+        both a successful query (a real record found, or confirmed none);
+        "error" means the call failed and must never be read as a
+        confirmed negative — see src/disposition.py, which maps this onto
+        CON29Field's disposition.
+        """
+        r = self.results.get(dataset)
+        if r is None or r.error is not None:
+            return "error"
+        return "positive" if r.entities else "negative"
 
     def failed_datasets(self) -> list[str]:
         return [d for d, r in self.results.items() if r.error is not None]
@@ -124,18 +150,30 @@ async def _query_dataset(
     client: httpx.AsyncClient, dataset: str, lat: float, lon: float
 ) -> DatasetResult:
     params = {"dataset": dataset, "latitude": lat, "longitude": lon}
+    source_url = redact_url(str(httpx.URL(PLANNING_DATA_BASE_URL, params=params)))
     try:
         resp = await client.get(PLANNING_DATA_BASE_URL, params=params)
         resp.raise_for_status()
         payload = resp.json()
         entities = payload.get("entities") or payload.get("results") or []
-        return DatasetResult(dataset=dataset, entities=entities)
+        return DatasetResult(
+            dataset=dataset,
+            retrieved_at=datetime.now(timezone.utc),
+            entities=entities,
+            source_url=source_url,
+        )
     except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as exc:
         # Same graceful-degradation principle as property_resolver.py's
         # _lookup_local_authority: one dataset failing shouldn't abort the
         # others. Recorded on the result so the caller can see exactly
         # which dataset(s) failed without losing the ones that succeeded.
-        return DatasetResult(dataset=dataset, entities=[], error=str(exc))
+        return DatasetResult(
+            dataset=dataset,
+            retrieved_at=datetime.now(timezone.utc),
+            entities=[],
+            error=str(exc),
+            source_url=source_url,
+        )
 
 
 async def get_planning_data(lat: float, lon: float) -> PlanningDataResult:

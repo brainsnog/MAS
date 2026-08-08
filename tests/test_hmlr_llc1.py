@@ -23,6 +23,10 @@ async def test_bristol_returns_manual_with_credentials_blocked_reason():
     assert result.blocked_reason is not None
     assert "Business Gateway" in result.blocked_reason
     assert "HMLR_BG_USERNAME" in result.blocked_reason
+    # DEF-04: retrieved_at must be timezone-aware — the dataclass can't
+    # enforce this the way CON29Field's AwareDatetime does, so this catches
+    # a bare datetime.now() rather than datetime.now(timezone.utc).
+    assert result.retrieved_at.tzinfo is not None
 
 
 @pytest.mark.asyncio
@@ -34,6 +38,7 @@ async def test_hackney_returns_manual_with_structural_blocked_reason():
     assert result.charges == []
     assert result.blocked_reason is not None
     assert "not migrated" in result.blocked_reason
+    assert result.retrieved_at.tzinfo is not None
 
 
 @pytest.mark.asyncio

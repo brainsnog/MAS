@@ -154,6 +154,11 @@ async def test_returns_listed_building_true_with_grade_and_entry(monkeypatch):
     assert result.grade == "II"
     assert result.list_entry == "1234567"
     assert result.match_count == 1
+    # DEF-04: retrieved_at must be timezone-aware — the dataclass can't
+    # enforce this the way CON29Field's AwareDatetime does, so this catches
+    # a bare datetime.now() rather than datetime.now(timezone.utc).
+    assert result.retrieved_at.tzinfo is not None
+    assert result.source_url is not None
 
 
 @pytest.mark.asyncio
@@ -192,13 +197,51 @@ async def test_layer_discovery_is_cached_across_calls(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_raises_service_error_if_no_listed_building_layer_found(monkeypatch):
+async def test_returns_unavailable_error_if_no_listed_building_layer_found(monkeypatch):
+    """
+    REWRITTEN 2026-08-06 (DEF-09): this used to assert a raised
+    HistoricEnglandServiceError. The adapter no longer raises at all — it's
+    the only one of the four adapters/agents that did, and DEF-09's fix is
+    "adapters never raise, they return a result carrying error" applied
+    consistently. Same failure condition, a different, now-consistent
+    shape: an error-carrying result, listed_building=None (not False, so
+    the error can never be mistaken for a confirmed negative — DEF-02's
+    discipline applies here too).
+    """
     root_with_no_match = {"layers": [{"id": 0, "name": "Conservation Areas"}]}
     transport = _mock_transport(QUERY_RESPONSE_NO_MATCH, root_response=root_with_no_match)
     _patch_client(monkeypatch, transport)
 
-    with pytest.raises(he.HistoricEnglandServiceError):
-        await he.get_listed_building_status(lat=51.0, lon=-2.0)
+    result = await he.get_listed_building_status(lat=51.0, lon=-2.0)
+
+    assert result.listed_building is None
+    assert result.error is not None
+    assert "no layer matching" in result.error.lower()
+    assert result.retrieved_at.tzinfo is not None
+
+
+@pytest.mark.asyncio
+async def test_returns_unavailable_error_on_a_genuine_query_failure(monkeypatch):
+    """The other never-raise path: discovery succeeds, but the /query call
+    itself fails (bad response shape here, standing in for a real HTTP
+    failure — httpx.MockTransport can't easily simulate a connection
+    error, but the except clause treats ValueError the same as
+    httpx.RequestError/HTTPStatusError)."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/query" in url:
+            return httpx.Response(200, content=b"not valid json")
+        return httpx.Response(200, json=FEATURE_SERVER_ROOT_RESPONSE)
+
+    transport = httpx.MockTransport(handler)
+    _patch_client(monkeypatch, transport)
+
+    result = await he.get_listed_building_status(lat=51.0, lon=-2.0)
+
+    assert result.listed_building is None
+    assert result.error is not None
+    assert "NHLE query failed" in result.error
+    assert result.retrieved_at.tzinfo is not None
 
 
 def test_covers_questions_matches_registry_primary_source():

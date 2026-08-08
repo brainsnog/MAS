@@ -89,9 +89,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Literal, Optional
 
 import httpx
+
+from src.disposition import DatasetStatus
+from src.redaction import redact_url
 
 Borough = Literal["bristol", "hackney"]
 
@@ -195,8 +199,54 @@ class DatasetResult:
     error: Optional[str] = None
     # Populated instead of attempting a call at all, for a KNOWN GAP (see
     # module docstring) — distinct from `error`, which means "we tried and
-    # it failed". Mirrors hmlr_llc1.py's blocked_reason.
+    # it failed". Mirrors hmlr_llc1.py's blocked_reason. Mutually exclusive
+    # with `error` by construction: a stub construction site sets only
+    # this, a query function sets only `error`. status_for() below
+    # collapses both to "error" for DEF-02's 3-state disposition mapping,
+    # but this field is kept distinct from `error` so that information
+    # isn't lost — WP-05 (registry reclassification, DEF-10) needs exactly
+    # this distinction to decide which "unavailable" fields are really
+    # "no permitted source exists" (flagged_manual) versus "the WFS call
+    # failed today" (a genuine, possibly transient, infrastructure error).
     unavailable_reason: Optional[str] = None
+    # DEF-04: None exactly when unavailable_reason is set — a stub makes no
+    # network call, so there is no real retrieval moment to timestamp.
+    # Populated for every other path (success or a genuine error), same as
+    # the other three adapters. Always construct with
+    # datetime.now(timezone.utc); a dataclass field cannot enforce
+    # timezone-awareness the way CON29Field's AwareDatetime does, so a
+    # naive datetime would pass here silently and only fail later, at
+    # CON29Field construction (WP-09).
+    retrieved_at: Optional[datetime] = None
+    # The actual resolved request URL, redacted per DEF-04. None under the
+    # same condition as retrieved_at — a stub has no request to capture.
+    source_url: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        """
+        Three invariants stated in the field comments above, made
+        unrepresentable rather than just documented — same precedent as
+        CON29Field's own validators (src/models.py).
+        """
+        if self.error is not None and self.unavailable_reason is not None:
+            raise ValueError(
+                f"{self.dataset}: error and unavailable_reason are mutually "
+                "exclusive — a dataset is either a known gap (no attempt "
+                "was made) or a failed attempt, never both"
+            )
+        if self.unavailable_reason is not None:
+            if self.retrieved_at is not None or self.source_url is not None:
+                raise ValueError(
+                    f"{self.dataset}: unavailable_reason means no attempt "
+                    "was made — retrieved_at and source_url must both be "
+                    "None"
+                )
+        elif self.retrieved_at is None or self.source_url is None:
+            raise ValueError(
+                f"{self.dataset}: every path other than an "
+                "unavailable_reason stub must capture retrieved_at and "
+                "source_url"
+            )
 
 
 @dataclass
@@ -210,8 +260,22 @@ class GisDataResult:
         r = self.results.get(dataset)
         return r.features if r else []
 
-    def has_any(self, dataset: str) -> bool:
-        return len(self.features_for(dataset)) > 0
+    def status_for(self, dataset: str) -> DatasetStatus:
+        """
+        DEF-02: tri-state, replacing has_any(). Both `error` (attempted,
+        failed) and `unavailable_reason` (known gap, no attempt made)
+        collapse to "error" here — see disposition.py, which documents
+        that both currently map to CON29Field's "unavailable" disposition
+        pending WP-05's registry reclassification. The underlying
+        distinction is NOT lost: it stays on the DatasetResult itself
+        (`.error` vs `.unavailable_reason`), this method just doesn't
+        surface it, since disposition.py doesn't have a fifth state to put
+        it in yet.
+        """
+        r = self.results.get(dataset)
+        if r is None or r.error is not None or r.unavailable_reason is not None:
+            return "error"
+        return "positive" if r.features else "negative"
 
     def failed_datasets(self) -> list[str]:
         return [d for d, r in self.results.items() if r.error is not None]
@@ -252,14 +316,27 @@ async def _query_arcgis(
     if distance_m:
         params["distance"] = distance_m
         params["units"] = "esriSRUnit_Meter"
+    url = f"{BRISTOL_MAPSERVER_URL}/{layer_id}/query"
+    source_url = redact_url(str(httpx.URL(url, params=params)))
     try:
-        resp = await client.get(f"{BRISTOL_MAPSERVER_URL}/{layer_id}/query", params=params)
+        resp = await client.get(url, params=params)
         resp.raise_for_status()
         payload = resp.json()
         features = [f.get("attributes", {}) for f in payload.get("features", [])]
-        return DatasetResult(dataset=dataset, features=features)
+        return DatasetResult(
+            dataset=dataset,
+            features=features,
+            retrieved_at=datetime.now(timezone.utc),
+            source_url=source_url,
+        )
     except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as exc:
-        return DatasetResult(dataset=dataset, features=[], error=str(exc))
+        return DatasetResult(
+            dataset=dataset,
+            features=[],
+            error=str(exc),
+            retrieved_at=datetime.now(timezone.utc),
+            source_url=source_url,
+        )
 
 
 async def _query_wfs(
@@ -295,14 +372,26 @@ async def _query_wfs(
         "outputFormat": "application/json",
         "CQL_FILTER": cql_filter,
     }
+    source_url = redact_url(str(httpx.URL(HACKNEY_WFS_URL, params=params)))
     try:
         resp = await client.get(HACKNEY_WFS_URL, params=params)
         resp.raise_for_status()
         payload = resp.json()
         features = [f.get("properties", {}) for f in payload.get("features", [])]
-        return DatasetResult(dataset=dataset, features=features)
+        return DatasetResult(
+            dataset=dataset,
+            features=features,
+            retrieved_at=datetime.now(timezone.utc),
+            source_url=source_url,
+        )
     except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as exc:
-        return DatasetResult(dataset=dataset, features=[], error=str(exc))
+        return DatasetResult(
+            dataset=dataset,
+            features=[],
+            error=str(exc),
+            retrieved_at=datetime.now(timezone.utc),
+            source_url=source_url,
+        )
 
 
 async def get_gis_data(borough: Borough, lat: float, lon: float) -> GisDataResult:

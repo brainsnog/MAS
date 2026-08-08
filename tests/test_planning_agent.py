@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from src.agents import planning_agent as pa
+from src.disposition import disposition_for_dataset_status
 
 _RealAsyncClient = httpx.AsyncClient
 
@@ -50,9 +51,9 @@ async def test_queries_every_dataset_and_groups_results(monkeypatch):
 
     assert set(result.results.keys()) == set(pa.ALL_DATASETS)
     assert len(result.entities_for("planning-application")) == 2
-    assert result.has_any("planning-application") is True
+    assert result.status_for("planning-application") == "positive"
     assert result.entities_for("conservation-area")[0]["name"] == "Clifton Conservation Area"
-    assert result.has_any("tree-preservation-order") is False
+    assert result.status_for("tree-preservation-order") == "negative"
     assert result.failed_datasets() == []
 
 
@@ -70,10 +71,23 @@ async def test_one_dataset_failing_does_not_abort_the_others(monkeypatch):
 
     assert result.failed_datasets() == ["tree-preservation-order"]
     assert result.results["tree-preservation-order"].error is not None
+    # DEF-02: an errored dataset must report status "error", never
+    # "negative" — has_any() used to collapse both to False.
+    assert result.status_for("tree-preservation-order") == "error"
+    # The half of DEF-02 that actually matters: fed through the real
+    # mapping function, a dataset that genuinely failed (not a synthetic
+    # status, an actual failed query above) must never end up
+    # determinate_negative — see test_disposition.py for the same
+    # assertion against a synthetic status; this is the same link with a
+    # real failure at the other end of it.
+    assert disposition_for_dataset_status(
+        result.status_for("tree-preservation-order")
+    ) == "unavailable"
     # Every other dataset still queried successfully despite the one failure:
     other_datasets = set(pa.ALL_DATASETS) - {"tree-preservation-order"}
     for dataset in other_datasets:
         assert result.results[dataset].error is None
+        assert result.status_for(dataset) == "negative"
 
 
 @pytest.mark.asyncio
@@ -92,6 +106,35 @@ async def test_all_datasets_queried_with_correct_point_params(monkeypatch):
     await pa.get_planning_data(lat=51.5, lon=-0.1)
 
     assert set(seen_datasets) == set(pa.ALL_DATASETS)
+
+
+@pytest.mark.asyncio
+async def test_every_dataset_result_captures_retrieved_at_and_source_url(monkeypatch):
+    """DEF-04: every dataset, success or failure, gets a real retrieval
+    timestamp and a captured (redacted) source URL — this source has no
+    credential, so redaction is a no-op, but the URL must still reflect the
+    actual query made."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        dataset = dict(request.url.params).get("dataset")
+        if dataset == "tree-preservation-order":
+            return httpx.Response(500, json={"error": "upstream problem"})
+        return httpx.Response(200, json=_entity_response([]))
+
+    _patch_client(monkeypatch, handler)
+
+    result = await pa.get_planning_data(lat=51.5, lon=-0.1)
+
+    for dataset in pa.ALL_DATASETS:
+        r = result.results[dataset]
+        # retrieved_at is required and non-Optional, so a None check would
+        # prove nothing. What actually matters — and what the dataclass
+        # cannot enforce, unlike CON29Field's AwareDatetime — is
+        # timezone-awareness; this catches a bare datetime.now().
+        assert r.retrieved_at.tzinfo is not None
+        assert r.source_url is not None
+        assert "dataset=" + dataset in r.source_url
+        assert "latitude=51.5" in r.source_url
+        assert "longitude=-0.1" in r.source_url
 
 
 def test_dataset_to_questions_matches_the_rebuilt_registry():

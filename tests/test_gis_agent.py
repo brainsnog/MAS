@@ -10,6 +10,8 @@ payload *shapes* (attributes/properties keys) are illustrative, matching the
 same "real endpoint, illustrative payload shape" split test_historic_england.py
 already documents for its own query-response fixtures.
 """
+from datetime import datetime, timezone
+
 import httpx
 import pytest
 
@@ -75,9 +77,13 @@ async def test_bristol_returns_matched_tpo_feature(monkeypatch):
 
     result = await ga.get_gis_data("bristol", lat=51.0, lon=-2.0)
 
-    assert result.has_any("tree_preservation_order") is True
+    assert result.status_for("tree_preservation_order") == "positive"
     assert result.features_for("tree_preservation_order")[0]["TPO_REF"] == "TPO/2019/12"
-    assert result.has_any("article_4_direction") is False
+    assert result.status_for("article_4_direction") == "negative"
+    # DEF-04: a real query attempt always captures retrieved_at/source_url.
+    tpo = result.results["tree_preservation_order"]
+    assert tpo.retrieved_at.tzinfo is not None
+    assert "/18/query" in tpo.source_url
 
 
 @pytest.mark.asyncio
@@ -93,6 +99,21 @@ async def test_bristol_one_dataset_failing_does_not_abort_the_other(monkeypatch)
 
     assert result.failed_datasets() == ["article_4_direction"]
     assert result.results["tree_preservation_order"].error is None
+    # DEF-02: an errored dataset must report status "error", never
+    # "negative" — has_any() used to collapse both to False.
+    assert result.status_for("article_4_direction") == "error"
+    assert result.status_for("tree_preservation_order") == "negative"
+    # This same GisDataResult also carries rights_of_way/contaminated_land
+    # as unavailable_reason stubs (see _get_bristol_gis_data) — both
+    # status_for "error" too, same as article_4_direction above, but
+    # failed_datasets() above already proved only article_4_direction
+    # appears there. That asymmetry (status_for collapses both, but
+    # failed_datasets()/unavailable_datasets() don't) is the entire
+    # justification for keeping error and unavailable_reason as separate
+    # fields rather than one merged flag.
+    assert result.status_for("rights_of_way") == "error"
+    assert "rights_of_way" not in result.failed_datasets()
+    assert "rights_of_way" in result.unavailable_datasets()
 
 
 @pytest.mark.asyncio
@@ -112,6 +133,18 @@ async def test_bristol_rights_of_way_and_contaminated_land_are_unavailable_not_q
     assert result.results["contaminated_land"].unavailable_reason is not None
     # No network call made for either — only the two real Bristol layers hit.
     assert len(queried) == 2
+
+    # The stub path is the one structural difference between gis_agent and
+    # the other three adapters, and the thing __post_init__ now enforces.
+    # error/unavailable_reason and retrieved_at/source_url being None here
+    # is not incidental — it's the invariant.
+    row = result.results["rights_of_way"]
+    assert row.error is None
+    assert row.retrieved_at is None
+    assert row.source_url is None
+    assert result.status_for("rights_of_way") == "error"
+    assert "rights_of_way" in result.unavailable_datasets()
+    assert "rights_of_way" not in result.failed_datasets()
 
 
 # ---------------------------------------------------------------------------
@@ -178,12 +211,19 @@ async def test_hackney_returns_matched_contaminated_land_feature(monkeypatch):
 
     result = await ga.get_gis_data("hackney", lat=51.5462, lon=-0.0615)
 
-    assert result.has_any("contaminated_land_part2a_investigated") is True
+    assert result.status_for("contaminated_land_part2a_investigated") == "positive"
     assert (
         result.features_for("contaminated_land_part2a_investigated")[0]["site_name"]
         == "Former gasworks site"
     )
-    assert result.has_any("contaminated_land_part2a_concern") is False
+    assert result.status_for("contaminated_land_part2a_concern") == "negative"
+    # DEF-04, exercised here rather than only on Bristol's ArcGIS path
+    # since it's worth more: _query_wfs builds its captured URL from a CQL
+    # filter, and that construction path has never been exercised against
+    # anything real.
+    row = result.results["contaminated_land_part2a_investigated"]
+    assert row.retrieved_at.tzinfo is not None
+    assert "part2a_site_investigated" in row.source_url
 
 
 @pytest.mark.asyncio
@@ -233,6 +273,37 @@ async def test_hackney_rights_of_way_is_unavailable_not_queried(monkeypatch):
 
 def test_tpo_buffer_is_15m_confirmed_with_griff_2026_08_02():
     assert ga.TPO_BUFFER_M == 15
+
+
+def test_dataset_result_rejects_error_and_unavailable_reason_together():
+    with pytest.raises(ValueError):
+        ga.DatasetResult(dataset="x", error="boom", unavailable_reason="no source")
+
+
+def test_dataset_result_rejects_retrieved_at_set_alongside_unavailable_reason():
+    with pytest.raises(ValueError):
+        ga.DatasetResult(
+            dataset="x",
+            unavailable_reason="no source",
+            retrieved_at=datetime.now(timezone.utc),
+        )
+
+
+def test_dataset_result_rejects_source_url_set_alongside_unavailable_reason():
+    with pytest.raises(ValueError):
+        ga.DatasetResult(
+            dataset="x",
+            unavailable_reason="no source",
+            source_url="https://example.invalid/query",
+        )
+
+
+def test_dataset_result_rejects_a_real_path_missing_retrieved_at():
+    """A successful/errored result with no unavailable_reason must always
+    carry retrieved_at and source_url — omitting them (e.g. a call site
+    forgetting to pass them through) must fail loudly, not silently."""
+    with pytest.raises(ValueError):
+        ga.DatasetResult(dataset="x", features=[{"a": 1}])
 
 
 def test_dataset_to_questions_covers_the_documented_question_set():
