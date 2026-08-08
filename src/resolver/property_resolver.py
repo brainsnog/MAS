@@ -35,18 +35,69 @@ VERIFICATION STATUS (checked against https://www.planning.data.gov.uk/docs, 2026
   always-None field for now. Sprint 1's `planning_agent.py` must query
   planning.data.gov.uk by point (lat/lon) intersection instead of assuming a
   pre-built property polygon — flagged there too, not yet built.
+
+DEF-03, FIXED 2026-08-06: `ResolvedProperty` was missing `borough`,
+`search_id`, and the OS Places address components (`BUILDING_NUMBER`,
+`SUB_BUILDING_NAME`, `BUILDING_NAME`, `THOROUGHFARE_NAME`, `POST_TOWN`),
+which are present in the DPA response and were thrown away in favour of the
+concatenated `ADDRESS` string. There was also no mapping from
+`local_authority_code` to a `Borough` literal, and no rejection path for
+out-of-scope addresses.
+
+`local_authority_code` now holds planning.data.gov.uk's `organisation-entity`
+value (an int identifying the owning council — 66 for Bristol City Council,
+163 for London Borough of Hackney, both confirmed live in Handoff Section
+3.5), NOT the `reference`/`name` string fields the previous version read.
+Decision, not a technical necessity: the previous local-authority-district
+test double fabricated `"reference": "bristol"` — an invented value, never
+confirmed against a real response — whereas organisation-entity 66/163 are
+values this project has actually seen returned by planning.data.gov.uk (on
+the brownfield-land dataset; not yet confirmed specifically on
+local-authority-district's own response shape, which is why
+`_lookup_local_authority` degrades to None rather than raising if the field
+is absent, same graceful-degradation treatment as every other failure mode
+here).
+
+`resolve()` raises `PropertyOutOfScopeError` when the local authority lookup
+succeeds AND resolves to an organisation-entity that is confirmed to be
+neither Bristol nor Hackney — a positive, confident signal the property is
+somewhere this system doesn't support. It does NOT raise when the lookup
+merely fails or returns nothing (network error, dataset miss, or the field
+being absent from the response) — that already degrades to
+`local_authority_code=None`/`borough=None`, same as before this fix,
+preserving `resolve()`'s existing "never raises on missing
+local_authority_code" behaviour for the genuinely-unknown case. Only a
+confirmed wrong answer raises; an absent one doesn't.
+
+DEF-04, FIXED 2026-08-06: the OS Places request URL carries the API key as a
+query parameter (`key=...`). `source_url` captures the actual resolved
+request URL, redacted via `src.redaction.redact_url` before it ever reaches
+`ResolvedProperty` — never store the raw one. `retrieved_at` is a required,
+aware `datetime` (`datetime.now(timezone.utc)`), matching the contract now
+shared by all four adapters/agents.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
+from uuid import uuid4
 
 import httpx
 
+from src.models import Borough
+from src.redaction import redact_url
+
 OS_PLACES_BASE_URL = "https://api.os.uk/search/places/v1/find"
 PLANNING_DATA_BASE_URL = "https://www.planning.data.gov.uk/entity.json"
+
+# Confirmed live, Handoff Section 3.5 (2026-08-05 discovery session).
+_BOROUGH_BY_ORGANISATION_ENTITY: dict[int, Borough] = {
+    66: "bristol",
+    163: "hackney",
+}
 
 
 class PropertyNotFoundError(Exception):
@@ -57,18 +108,49 @@ class ResolverServiceError(Exception):
     """Raised on an unexpected upstream error (non-2xx, timeout, bad payload)."""
 
 
+class PropertyOutOfScopeError(Exception):
+    """
+    Raised when the resolved local authority is confirmed to be neither
+    Bristol nor Hackney — the two boroughs this system supports. NOT raised
+    when the local authority simply couldn't be determined (see module
+    docstring DEF-03) — only a confident wrong answer raises.
+    """
+
+
 @dataclass
 class ResolvedProperty:
     uprn: str
     address: str
     lat: float
     lon: float
-    x_coordinate: float
-    y_coordinate: float
+    x_coordinate: Optional[float]
+    y_coordinate: Optional[float]
     postcode: Optional[str]
+    # DEF-03: per-search identifier. Generated with uuid4() if the caller
+    # doesn't supply one — see resolve()'s own docstring. No orchestrator
+    # exists yet to own a canonical per-search id, so the resolver
+    # generates a sensible default rather than requiring one that has
+    # nowhere else to come from yet.
+    search_id: str
+    # DEF-04: required, aware datetime — never a string. Always construct
+    # with datetime.now(timezone.utc); a dataclass field cannot enforce
+    # timezone-awareness the way CON29Field's AwareDatetime does.
+    retrieved_at: datetime
     match_score: Optional[float] = None
     match_description: Optional[str] = None
-    local_authority_code: Optional[str] = None
+    # DEF-03: organisation-entity value, not the previous version's
+    # fabricated "reference" string — see module docstring.
+    local_authority_code: Optional[int] = None
+    borough: Optional[Borough] = None
+    # DEF-03: OS Places DPA address components, previously discarded in
+    # favour of only the concatenated ADDRESS string.
+    building_number: Optional[str] = None
+    sub_building_name: Optional[str] = None
+    building_name: Optional[str] = None
+    thoroughfare_name: Optional[str] = None
+    post_town: Optional[str] = None
+    # DEF-04: the actual resolved OS Places request URL, redacted.
+    source_url: Optional[str] = None
     # Not sourced by this resolver — see Architecture Decisions & Changes,
     # 2026-07-25, in CON29_ROADMAP_v2.md. No free/open source of a property's
     # own parcel polygon exists (that's HMLR's licensed INSPIRE Index Polygons).
@@ -77,7 +159,7 @@ class ResolvedProperty:
     polygon_wkt: Optional[str] = None
 
 
-async def _call_os_places_find(address: str, api_key: str) -> dict:
+async def _call_os_places_find(address: str, api_key: str) -> tuple[dict, str]:
     # output_srs=WGS84 is required, not optional: OS Places API defaults to
     # EPSG:27700 (British National Grid, X/Y only) and omits LAT/LNG entirely
     # unless WGS84 output is explicitly requested. Without this, every real
@@ -91,6 +173,7 @@ async def _call_os_places_find(address: str, api_key: str) -> dict:
         "maxresults": 1,
         "output_srs": "WGS84",
     }
+    source_url = redact_url(str(httpx.URL(OS_PLACES_BASE_URL, params=params)))
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             resp = await client.get(OS_PLACES_BASE_URL, params=params)
@@ -109,17 +192,20 @@ async def _call_os_places_find(address: str, api_key: str) -> dict:
     if not results:
         raise PropertyNotFoundError(f"No match found for address: {address!r}")
 
-    return results[0]["DPA"]
+    return results[0]["DPA"], source_url
 
 
-async def _lookup_local_authority(lat: float, lon: float) -> Optional[str]:
+async def _lookup_local_authority(lat: float, lon: float) -> Optional[int]:
     """
-    Look up the local-authority-district entity containing this point.
+    Look up the local-authority-district entity containing this point and
+    return its organisation-entity value — see module docstring DEF-03 for
+    why this reads organisation-entity, not reference/name.
 
     Query shape confirmed against https://www.planning.data.gov.uk/docs,
     2026-07-25 — see module docstring. Falls back to None (not a crash) if
-    the lookup fails, per the roadmap's "resolver handles failure gracefully"
-    success criterion.
+    the lookup fails OR if the entity is present but has no
+    organisation-entity field, per the roadmap's "resolver handles failure
+    gracefully" success criterion.
     """
     params = {
         "dataset": "local-authority-district",
@@ -133,23 +219,29 @@ async def _lookup_local_authority(lat: float, lon: float) -> Optional[str]:
             payload = resp.json()
             entities = payload.get("entities") or payload.get("results") or []
             if entities:
-                return entities[0].get("reference") or entities[0].get("name")
+                value = entities[0].get("organisation-entity")
+                return int(value) if value is not None else None
         except (httpx.RequestError, httpx.HTTPStatusError, ValueError, KeyError):
             return None
     return None
 
 
-async def resolve(address: str) -> ResolvedProperty:
+async def resolve(address: str, search_id: Optional[str] = None) -> ResolvedProperty:
     """
-    Resolve a free-text UK property address to UPRN, coordinates, and local
-    authority code. `polygon_wkt` on the result is always None — see module
-    docstring VERIFICATION STATUS for why.
+    Resolve a free-text UK property address to UPRN, coordinates, address
+    components, and borough. `polygon_wkt` on the result is always None —
+    see module docstring VERIFICATION STATUS for why.
+
+    `search_id` is generated with uuid4() if not supplied — see
+    ResolvedProperty.search_id's own docstring.
 
     Raises PropertyNotFoundError if the address cannot be matched.
     Raises ResolverServiceError on unexpected upstream failure.
-    Never raises on missing local_authority_code — it degrades to None rather
-    than failing the whole resolution, since downstream agents can still
-    operate on UPRN + coordinates alone.
+    Raises PropertyOutOfScopeError if the address resolves to a confirmed
+    local authority outside Bristol/Hackney — see module docstring DEF-03.
+    Never raises on a merely UNDETERMINED local_authority_code/borough — it
+    degrades to None rather than failing the whole resolution, since
+    downstream agents can still operate on UPRN + coordinates alone.
     """
     api_key = os.environ.get("OS_PLACES_API_KEY")
     if not api_key:
@@ -158,7 +250,7 @@ async def resolve(address: str) -> ResolvedProperty:
             "OS Data Hub account and store the key as a Codespace secret."
         )
 
-    dpa = await _call_os_places_find(address, api_key)
+    dpa, source_url = await _call_os_places_find(address, api_key)
 
     uprn = dpa.get("UPRN")
     lat = dpa.get("LAT")
@@ -176,6 +268,17 @@ async def resolve(address: str) -> ResolvedProperty:
         )
 
     local_authority_code = await _lookup_local_authority(lat, lon)
+    borough = (
+        _BOROUGH_BY_ORGANISATION_ENTITY.get(local_authority_code)
+        if local_authority_code is not None
+        else None
+    )
+    if local_authority_code is not None and borough is None:
+        raise PropertyOutOfScopeError(
+            f"Resolved local authority organisation-entity "
+            f"{local_authority_code} is neither Bristol (66) nor Hackney "
+            f"(163) — {address!r} is outside this system's supported scope."
+        )
 
     return ResolvedProperty(
         uprn=str(uprn),
@@ -185,8 +288,17 @@ async def resolve(address: str) -> ResolvedProperty:
         x_coordinate=float(x_coord) if x_coord is not None else None,
         y_coordinate=float(y_coord) if y_coord is not None else None,
         postcode=postcode,
+        search_id=search_id or str(uuid4()),
+        retrieved_at=datetime.now(timezone.utc),
         match_score=float(match_score) if match_score is not None else None,
         match_description=match_description,
         local_authority_code=local_authority_code,
+        borough=borough,
+        building_number=dpa.get("BUILDING_NUMBER"),
+        sub_building_name=dpa.get("SUB_BUILDING_NAME"),
+        building_name=dpa.get("BUILDING_NAME"),
+        thoroughfare_name=dpa.get("THOROUGHFARE_NAME"),
+        post_town=dpa.get("POST_TOWN"),
+        source_url=source_url,
         polygon_wkt=None,
     )
