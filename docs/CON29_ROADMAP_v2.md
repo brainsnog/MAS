@@ -482,6 +482,13 @@ OS_NAMES_API_KEY=        # Already registered — gazetteer/place-name search on
 Every search produces an evidence manifest alongside the CON29 JSON.
 This is the audit trail. It is as important as the CON29 output itself.
 
+> **DEF-04, added 2026-08-06:** the `source_url` example below is illustrative
+> and carries no credential, but OS Places API URLs (`property_resolver.py`)
+> and any other query-string-authenticated source carry the API key as a
+> query parameter — writing one into this manifest unredacted would put a
+> live credential in a dissertation appendix. Every `source_url` written here
+> must be passed through `src/redaction.py`'s `redact_url()` first.
+
 ```json
 {
   "search_id": "7f82a91b",
@@ -527,6 +534,32 @@ This is the audit trail. It is as important as the CON29 output itself.
 ---
 
 ## CON29 Output Schema
+
+> **SUPERSEDED 2026-08-06 — built as `src/models.py`, WP-01.** The illustrative
+> draft below predates the build. Three concrete differences, all deliberate:
+>
+> - `coverage_flag` is replaced by `disposition`
+>   (`determinate_positive` / `determinate_negative` / `flagged_manual` /
+>   `unavailable` — Handoff Section 5). The two are different axes:
+>   `coverage_flag`/bucket (still in `con29_registry.py`) is which retrieval
+>   *tier* a question is expected to use; `disposition` is what actually
+>   happened for one field on one real search — a bucket-1 (auto) question
+>   can still end up `unavailable` on a given search if its source errored.
+> - CON29Field now enforces disposition/error consistency at construction: a
+>   `determinate_negative` field can never carry an `error`, and an
+>   `unavailable` field must. This is DEF-02 made unrepresentable rather
+>   than fixed at the call site — construction raises `ValidationError`, so
+>   a caller that treats a failed query as a confirmed negative cannot
+>   build the field at all. The draft below had no such constraint.
+> - `retrieval_method` drops `"playwright"`. Considered and deliberately
+>   excluded, not overlooked: it has never been used, is in no work
+>   package, and Handoff Section 4 rules out the only sources (the two
+>   council planning portals) it would have targeted.
+>
+> `retrieved_at`/`search_timestamp` are `AwareDatetime`, not `str` — see
+> `src/models.py`'s own docstring and `tests/test_models.py` for the tested
+> (not assumed) strict-mode behaviour. See `src/models.py` for the real
+> schema; this block is kept for historical context only.
 
 ```python
 from pydantic import BaseModel, model_validator
@@ -586,7 +619,9 @@ con29-search/
 │
 ├── src/
 │   ├── __init__.py
-│   ├── models.py               ← Pydantic schemas (CON29Field, PropertySearchResult)
+│   ├── models.py               ← Pydantic schemas (CON29Field, PropertySearchResult) — built WP-01, 2026-08-06
+│   ├── disposition.py          ← dataset status -> Section 5 four-state disposition (DEF-02) — built WP-02, 2026-08-06
+│   ├── redaction.py            ← redact_url(): strips credentials from captured URLs (DEF-04) — built WP-02, 2026-08-06
 │   ├── con29_registry.py       ← All CON29R questions, IDs, descriptions, bucket classification
 │   │
 │   ├── resolver/
@@ -643,6 +678,11 @@ con29-search/
 │       ├── __init__.py
 │       └── session_store.py      ← ephemeral per-search folder, cleanup on completion
 │
+├── scripts/                     ← not in the original tree; added Sprint 2 §A onward
+│   ├── __init__.py
+│   ├── tally_sprint1_coverage.py ← superseded by Handoff Section 5's metric — see WP-06
+│   └── verify_section1.py      ← re-runnable derivation backing Handoff Section 1's sub-question wiring figures
+│
 ├── ui/
 │   └── app.py                  ← Gradio interface (Hugging Face Spaces entry point)
 │
@@ -654,8 +694,9 @@ con29-search/
 │
 ├── tests/
 │   ├── fixtures/
-│   │   ├── bristol/            ← sample API responses for Bristol
-│   │   └── hackney/            ← sample portal HTML/JSON for Hackney
+│   │   ├── bristol/             ← real captured OS Places response for Bristol (verified genuine, not a mock — see its own "_fixture_note")
+│   │   ├── hackney/             ← real captured OS Places response for Hackney (same)
+│   │   └── discovery/           ← 31 captured responses from the 2026-08-05 discovery session: Bristol ArcGIS metadata and queries, planning.data.gov.uk entities, robots.txt and WAF evidence. See CON29_BUILD_HANDOFF.md Sections 3 and 4.
 │   ├── test_resolver.py
 │   ├── test_planning_agent.py
 │   ├── test_gis_agent.py
@@ -1326,6 +1367,11 @@ demo.launch()
 | 2026-08-02 | Reassessed the Sprint 0 success criterion "CON29 registry contains all 28+ question groups" rather than silently forcing the real-form rebuild to hit that number | Griff's real exemplar supports 19 confirmed + 3 unconfirmed-numbering = 22 total top-level groups for CON29 Part 1 alone. The original "28+" figure appears to have been an estimate that didn't survive contact with the real form — reaching it may require CON29O (optional enquiries), a separate form this exemplar doesn't include. Flagged in the Sprint 0 checklist itself (marked `[~]`, not silently checked off) with the reasoning attached, rather than quietly padding the registry to hit a target that may itself need revising — same treatment as the Bristol-conservation-area criterion correction earlier this sprint |
 | 2026-08-03 | RESOLVED the 2026-08-02 TPO/Article-4 flag: `gis_agent.py` and `planning_agent.py` corrected to match `con29_registry.py`'s real-form rebuild. TPO references changed "3.7" -> "3.9m" throughout both modules and their tests. Enforcement notices changed "1.1g" -> "3.9a". Article 4 moved out of both modules' `DATASET_TO_QUESTIONS` into a new `NON_CON29_DATASETS` dict (dataset name -> reason string) in each — still genuinely queried, just no longer claimed to answer a CON29 question | Confirmed with Griff before touching either already-built module, per this roadmap's own standing rule. `planning_agent.py`'s `get_planning_data()` was iterating `DATASET_TO_QUESTIONS` directly to decide what to fetch — moving Article 4 out of that dict would have silently stopped querying it, a real functional regression, not just a documentation fix. Introduced `ALL_DATASETS` (the union of `DATASET_TO_QUESTIONS` and `NON_CON29_DATASETS`) and pointed the query loop at that instead. `gis_agent.py` needed no equivalent fix — its per-dataset query calls were already hardcoded, not dict-iteration-driven, so moving Article 4's question-mapping there was a pure documentation change. 8 new/updated tests across `test_planning_agent.py` and `test_gis_agent.py`; 59/59 passing across the whole suite |
 | 2026-08-03 | Corrected `scripts/tally_sprint1_coverage.py`'s own hardcoded group table (standalone "3.7" TPO group, "1.1h-i Article 4" group, mislabeled "3.6 Outstanding notices", nonexistent "3.2") to match the same real-form IDs — surfacing that the corrected tally is 8 architectural / 6 functional groups, down from the 10 / 8 reported at Sprint 1's closure. Sprint 1's own "at least 10 CON29 question groups for Bristol" success criterion, previously reported as met, **is no longer met** with the corrected IDs | This tally script doesn't import `con29_registry.py` directly — it hardcodes its own group table mirroring the roadmap's original (now-superseded) classification, so it didn't automatically pick up yesterday's registry rebuild and needed its own pass. The drop in group count is a correction to what the same real API calls were honestly claimed to answer, not a loss of functionality — no adapter's actual behaviour changed. Recorded here rather than silently lowering the test threshold to make it look unchanged; Sprint 1's closure claim itself may need revisiting with Griff as a separate conversation from continuing Sprint 2 |
+| 2026-08-06 | `CON29Field.disposition` (four-state: `determinate_positive`/`determinate_negative`/`flagged_manual`/`unavailable`, Handoff Section 5) replaces `coverage_flag` in `src/models.py` (WP-01) | `coverage_flag`/bucket described which retrieval tier a question is *expected* to use, not what happened on a given real search — a bucket-1 question can still error. Section 5's four-state model is what actually needs enforcing, and now is (see the disposition/error consistency invariant below) |
+| 2026-08-06 | `"playwright"` removed from `retrieval_method` entirely in `src/models.py` (WP-01), superseding the 2026-07-22 "demoted to last resort" row above rather than leaving two live decisions in disagreement | Never used, in no work package, and Handoff Section 4 rules out the only sources (the two council planning portals) it would have targeted. "Last resort" implied it would eventually be reached for something; nothing in the confirmed source catalogue supports that anymore |
+| 2026-08-06 | `CON29Field` enforces disposition/error consistency at construction (DEF-02): `determinate_negative` can never carry an `error`; `unavailable` always must | Makes the DEF-02 conflation ("queried, no record" vs "query failed") unrepresentable rather than merely fixed at each call site — construction raises `ValidationError` if violated |
+| 2026-08-06 | Every captured request URL must pass through `src/redaction.py`'s `redact_url()` before storage anywhere (DatasetResult, ResolvedProperty, eventually CON29Field.source_url) — DEF-04 | OS Places API carries its key as a query parameter; an unredacted capture would put a live credential in an evidence manifest destined for a dissertation appendix |
+| 2026-08-06 | All four adapters (`hmlr_llc1.py`, `planning_agent.py`, `gis_agent.py`, `historic_england.py`) construct and store aware `datetime` objects (`datetime.now(timezone.utc)`) as `retrieved_at`, never formatted strings — DEF-04, scope extended to `hmlr_llc1.py` mid-WP-02 | `CON29Field.retrieved_at` is `AwareDatetime`; tested directly that its Python constructor rejects every string form, including the roadmap's own `...Z` manifest format (only `model_validate_json` accepts strings). A string on an adapter dataclass would be a lossy round trip handing a future mapper a parsing layer to get wrong |
 
 ---
 
@@ -1359,6 +1405,8 @@ demo.launch()
 | 2026-08-02 | Sprint 2 | Built `src/agents/gis_agent.py` against the confirmed real endpoints/layer names — two backend functions (`_query_arcgis`, `_query_wfs`) behind one per-borough dispatcher. 12 new tests added (`tests/test_gis_agent.py`), network-mocked, same `httpx.MockTransport` pattern as the rest of the suite. 49/49 tests passing across Sprint 0-2 combined. Bristol's Rights of Way/Contaminated Land and Hackney's Rights of Way represented as explicit `unavailable_reason` stubs rather than silently omitted or invented — same treatment as the HMLR stub. Corrected Sprint 2's own success-criteria checklist rather than force-fitting: the "Bristol conservation area" criterion can't be met by this module as built (that field is already covered elsewhere, by `planning_agent.py`) — flagged `[~]`, not silently checked off. Document Agent (`pdf_extractor.py`, `llm_extractor.py`) and `session_store.py` — the rest of Sprint 2 — not yet started. Test property set still not locked with the law firm partner; remains a hard gate before Sprint 3. |
 | 2026-08-02 | Sprint 0 (registry gap) | Griff shared the real St Albans CON29R/LLC1 exemplar (search ref A/2025/00248) that had been referenced but not yet attached in earlier sessions, plus a `schema.xsd` in response to last session's Hackney geometry-field-name ask. The schema call turned out inconclusive (a wrapper document with two unfollowed `xsd:import`s, not the field definitions themselves) — flagged, two ready-made follow-up URLs given to Griff, gap stays open; Griff opted to defer this and the Historic England/Gemini fixture-capture items to continue with the rest of the sprint. Rebuilt `src/con29_registry.py` from scratch against the real exemplar — full account in Architecture Decisions. Surfaced a genuine architecture-affecting discovery mid-rebuild (TPO is real-form 3.9(m) not 3.7; Article 4 has no standalone CON29 number) that contradicts what `gis_agent.py` and `planning_agent.py` were already built against — flagged prominently in the registry's own module docstring and held for confirmation, per this roadmap's standing rule, rather than silently propagated into the already-built adapters. Added `tests/test_con29_registry.py` (8 tests, 57/57 total across the suite) locking in the real-form fidelity so a future edit can't silently drift back toward guessed text. Reassessed the Sprint 0 "28+ question groups" target honestly rather than padding to meet it — see Architecture Decisions. |
 | 2026-08-03 | Sprint 0 (registry gap), resolution | Griff confirmed resolving the TPO/Article-4 flag before continuing to Sprint 2 §B. Corrected `gis_agent.py` and `planning_agent.py` to match `con29_registry.py`'s real-form IDs: TPO "3.7" -> "3.9m" throughout; enforcement notices "1.1g" -> "3.9a"; Article 4 moved out of `DATASET_TO_QUESTIONS` into a new `NON_CON29_DATASETS` dict in each module (still queried, no longer claimed to answer a CON29 question). Fixed a real risk while doing so: `planning_agent.py`'s query loop iterated `DATASET_TO_QUESTIONS` directly, so moving Article 4 out would have silently stopped fetching it — introduced `ALL_DATASETS` and repointed the loop at that instead. Also corrected `scripts/tally_sprint1_coverage.py`'s own hardcoded group table, which had the same wrong IDs baked in independently of the registry — this surfaced that Sprint 1's own "at least 10 CON29 question groups" closure claim (reported 10/8, architectural/functional) no longer holds once corrected (now 8/6). Recorded as a real, honest regression in Architecture Decisions rather than adjusted quietly. 8 new/updated tests; 59/59 passing across the whole suite. Ready to move to Sprint 2 §B — Document Agent. |
+| 2026-08-06 | Sprint 2 | Compiled `CON29_BUILD_HANDOFF.md` v1.0 from a full live discovery session in which every Section 3 endpoint was queried live (2026-08-05) — confirmed source catalogue, access-governance findings (Section 4), the Section 5 coverage metric replacement, and a twelve-item defect register. Verified Section 1 against the actual repo before any code was written, per the handoff's own "verify before building" rule: test suite and coverage tally matched exactly (59 passed, 8/6 groups NOT MET); the sub-question wiring figure didn't (handoff claimed 14/63 architecturally wired, derivation gave 18/63 — an arithmetic error in the handoff, corrected there, re-runnable as `scripts/verify_section1.py`). Independently verified all twelve defects against code or captured fixtures; found one additional inaccuracy in DEF-05's own cited evidence (50m buffer test: "four neighbouring properties" claimed, real fixture recount is 50 features across 19 distinct addresses) and corrected it. Environment scaffolding (DEF-12) closed: `requirements.txt`/`requirements-dev.txt` pinned from a clean python 3.11 resolution, CI and README updated. |
+| 2026-08-06 | Sprint 2 | Built `src/models.py` (WP-01) — `CON29Field`/`PropertySearchResult`, Section 5's four-state disposition, disposition/error consistency enforced at construction (DEF-02). Caught and corrected a false assumption before it shipped: the first draft's docstring claimed AwareDatetime accepts ISO-8601 strings under pydantic strict mode; tested directly against pydantic==2.13.4 and found the Python constructor rejects every string form (only `model_validate_json` accepts them) — corrected the docstring to the tested behaviour, logged in the Handoff Deviation Log. Started WP-02 (DEF-02/03/04/09): built `src/redaction.py` (`redact_url`, DEF-04) and `src/disposition.py` (dataset status -> disposition, DEF-02's acceptance criterion made executable). Found and fixed a real fail-closed gap in `redact_url` during testing (non-str/bytes input silently bypassed the except branch, which would have let a bytes URL carrying a credential round-trip unredacted) rather than after. Scope of DEF-04 extended to `hmlr_llc1.py` (overruling an initial "out of scope" instinct) so all four adapters share one timestamp contract — `retrieved_at: datetime`, aware, never a string — rather than shipping a three-versus-one inconsistency inside the same work package meant to remove exactly that class of defect. 109/109 tests passing. Remaining WP-02 work (property_resolver.py DEF-03, planning_agent.py/gis_agent.py DEF-02 tri-state + DEF-04, historic_england.py DEF-09, normaliser.py call-site updates) in progress. |
 
 ---
 
