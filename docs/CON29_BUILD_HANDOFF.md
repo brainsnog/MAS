@@ -3,6 +3,7 @@
 ## Verified state, defect register, confirmed source catalogue, and work packages
 
 **Version 1.0 — compiled 2026-08-05**
+**Last amended: 2026-08-07 — see Deviation Log (Section 10) for every amendment since compilation**
 **Submission deadline: 2026-08-20**
 
 ---
@@ -19,13 +20,51 @@
 > 2. **Section 4 lists sources that must NOT be built against.** These are access-governance decisions, not technical obstacles. Do not implement a workaround, do not add a User-Agent header to defeat a challenge, do not ignore a `Disallow`. If a work package appears to require one of these, stop and flag it.
 > 3. **Verify before building.** This project has repeatedly been saved by querying a source before writing an adapter for it, and repeatedly embarrassed when that step was skipped. Where this document says "unverified", it means unverified — query it first.
 > 4. **Graceful degradation over omission.** Where a source is blocked or absent, the correct output is an explicit `DatasetResult.unavailable_reason` stub or a Bucket 3 classification, never a silently missing field.
-> 5. Update the Project Log and Deviation Log in `CON29_ROADMAP_v2.md` at the end of every session.
+> 5. Update the handoff's Current state block (Section 1) and Deviation Log (Section 10), and the roadmap's Current State block and Project Log, at the end of every session.
 
 ---
 
 ## 1. Current verified state
 
-Verified by execution 2026-08-05, sub-question figures re-verified 2026-08-06, not by reading documentation.
+### Current state (updated 2026-08-07)
+
+```
+Tests:               130 passed (up from 59 at compilation)
+Work packages done:  WP-01 (src/models.py), WP-02 (DEF-02, DEF-03, DEF-04, DEF-09)
+Work package next:   WP-03 — wire the GIS agent (DEF-01, DEF-05, DEF-06, DEF-07),
+                      includes the first live Hackney WFS call
+Defects closed:      DEF-02, DEF-03, DEF-04, DEF-09, DEF-12. DEF-12 is closed
+                      as scoped in Section 6 (requirements/CI/README);
+                      retry/backoff/structured logging/latency capture are
+                      tracked separately as WP-13, not an open half of DEF-12.
+Defects open:        DEF-01, DEF-05, DEF-06, DEF-07, DEF-08, DEF-10, DEF-11
+Sub-question wiring: UNCHANGED — 18 of 63 architecturally wired (29%),
+                      12 of 63 functional (19%). WP-01/WP-02 were correctness
+                      fixes, not new source wiring, so this figure does not
+                      move until WP-03.
+Coverage tally:      UNCHANGED — 8 architectural / 6 functional groups, "NOT MET"
+Two corrections to the 2026-08-05 baseline below, not defects in it:
+  - src/models.py now exists (WP-01) — the "What does not exist" line
+    below is stale as of this session.
+  - The GitHub repository has been pushed after every commit this
+    session — the "materially behind local work" note below is stale
+    as of this session.
+Real open blockers, not yet closed by any work package:
+  - DEF-01: gis_agent.py results still never reach PropertyRecord.
+  - Hackney WFS assumptions (DEF-06 geometry field, DEF-07 WFS 2.0 params)
+    remain unverified against a real call.
+  - organisation-entity is unconfirmed on local-authority-district's own
+    response shape (flagged under WP-03 in Section 7).
+  - The WP-11 test property set is not locked.
+```
+
+This block is updated at the end of every session (same discipline as the
+Deviation Log below) so it does not drift again — do not let "Current state"
+silently fall behind while the baseline underneath it stays frozen.
+
+### Verified baseline at compilation (2026-08-05)
+
+Verified by execution 2026-08-05, sub-question figures re-verified 2026-08-06, not by reading documentation. **Frozen as of that date** — see "Current state" above for what has since changed. Section 6's defect register is written against this baseline, so the figures below are kept as originally recorded, not updated in place.
 
 ```
 Test suite:        59 passed in 0.31s
@@ -488,6 +527,8 @@ These are the user's, not Claude Code's. Flag rather than assume.
 
 ## 10. Deviation log
 
+Scope: this log holds discrepancies against this document itself, and defects found while executing against it. Issues discovered while building against a live source (a real API not behaving as assumed) go to `CON29_ROADMAP_v2.md`'s Troubleshooting Log. Overlap is possible — flag either way rather than leaving nothing findable.
+
 | Date | Work package | Issue | Resolution |
 |---|---|---|---|
 | 2026-08-06 | Verification (pre-WP-01) | Section 1's "14 of 63 architecturally wired" was an arithmetic error — the functional adjustment (subtracting the four rights-of-way stub IDs 2.2-2.5) had been applied to the architectural count too. Rights of way IS architecturally wired: `gis_agent.DATASET_TO_QUESTIONS` maps it, and the explicit `unavailable_reason` stub is the graceful-degradation pattern this project mandates, not an absence of wiring. | Corrected Section 1 to 18 of 63 (29%) architecturally wired; functional stays 12 of 63 (19%). Derivation is in `scripts/verify_section1.py`, re-runnable rather than a one-off check. |
@@ -496,3 +537,4 @@ These are the user's, not Claude Code's. Flag rather than assume.
 | 2026-08-06 | WP-02, DEF-04 | DEF-04's scope was drafted as three adapters (`planning_agent.py`, `gis_agent.py`, `historic_england.py`) that don't capture a retrieval timestamp yet, deliberately excluding `hmlr_llc1.py` (already has `retrieved_timestamp: str` via `_now_iso()`) as out of scope for this work package. Overruled: WP-02 exists to make contracts consistent (DEF-09 is literally "one error contract, applied everywhere"), so shipping a three-datetime-objects-versus-one-string inconsistency inside the same work package, with a note to unify later, creates the exact class of defect the package exists to remove. The module is also small — a degradation stub with no live retrieval — so the cost of fixing it now is minutes, not a detour. | DEF-04's scope extended to `hmlr_llc1.py`. `retrieved_timestamp: str` renamed to `retrieved_at: datetime` (aware, matching `CON29Field`), `_now_iso()` deleted, both stub functions construct `datetime.now(timezone.utc)` directly. Also settled: `retrieved_at` is `Optional[datetime]` exactly where "no retrieval attempt was made at all" is a real state (only `gis_agent`'s `unavailable_reason` stubs qualify); every other adapter/path represents a real attempt (success, caught error, or hmlr_llc1's "checked and confirmed blocked") and so is required, non-Optional. |
 | 2026-08-06 | WP-02, DEF-04 | `src/redaction.redact_url`'s fail-closed guarantee did not hold for non-string input. `urlsplit(None)` does not raise — it silently returns an empty bytes-typed `SplitResult`, so the `except` branch never fires. Consequence proven, not assumed: `urlsplit(b"https://api.os.uk/find?key=supersecret")` reconstructs byte-identical via `urlunsplit`, credential intact, because `name.lower()` compares `bytes` against a set of `str` and never matches — a bytes URL carrying a credential would have round-tripped unredacted into an evidence manifest. Found by `test_non_string_input_fails_closed` failing with `b'' == 'REDACTED_UNPARSEABLE_URL'` rather than passing. | Added an explicit `isinstance(url, str)` guard at the top of `redact_url`, returning the fail-closed marker directly rather than relying on an exception that does not actually occur for `None`/`bytes` input. Added `test_bytes_input_carrying_a_credential_fails_closed_rather_than_leaking_it`, the case that actually matters, alongside the `None` case. |
 | 2026-08-06 | WP-02, DEF-02 | DEF-02's fix was drafted as scoped to `has_any()` on `PlanningDataResult`/`GisDataResult` — a dataclass-method-level fix. `src/normalisation/normaliser.py` turned out to carry the identical conflation independently, in source code, on legally material fields: `tree_preservation_order` and `brownfield_land` were plain `bool` populated via `has_any()`, and `conservation_area` used `len(entities_for(...)) > 0` — the same bug under a different spelling, never routed through `has_any()` at all. An errored TPO/brownfield/conservation-area query read as a confirmed negative on a CON29-bound field. The existing test suite had actively encoded this as correct behaviour: `test_failed_dataset_surfaced_as_warning_not_silently_dropped` asserted `tree_preservation_order is False` for a dataset with `error="HTTP 500"` — DEF-02's exact failure mode, passing as a regression test. | Extended DEF-02's fix into `normaliser.py`: `conservation_area`, `tree_preservation_order`, `brownfield_land`, and `listed_building` are now `Optional[bool]` on `PropertyRecord`, routed through the new `status_for()`/`src.disposition.disposition_for_dataset_status()` path rather than a second hand-rolled convention. `None` now means "the query errored", distinct from Article 4's pre-existing `None` ("this source was never authoritative here") — both use the same representation for a different reason, documented explicitly on each field so WP-09's mapper doesn't conflate them. The old test was rewritten (not just extended) to assert `None`; a new `test_normalise_never_raises_when_every_dataset_and_historic_england_error` covers the total-failure case, which nothing previously exercised as a single "does not raise" test. |
+| 2026-08-07 | Documentation alignment | Rule 5 (INSTRUCTION FOR CLAUDE CODE, top of this document) named the wrong file for the Deviation Log: "Update the Project Log and Deviation Log in `CON29_ROADMAP_v2.md`". The Deviation Log is Section 10 of the handoff itself; the roadmap has no Deviation Log section at all, only a Troubleshooting Log and a Project Log. Found while adding a CLAUDE.md rule to keep both documents' state blocks from drifting again, which would have repeated the same error if copied as written. | Corrected rule 5 to name the real locations: the handoff's Current state block (Section 1) and Deviation Log (Section 10), and the roadmap's Current State block and Project Log. CLAUDE.md's new rule states the same thing plainly, not as a "follow this line, not that one" workaround. |

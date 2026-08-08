@@ -20,8 +20,13 @@ the handoff wins and says so explicitly.
 ## Discipline
 
 - One work package at a time. Do not start the next until tests pass.
-- Existing tests must keep passing. Current baseline: 59.
-- Update the Project Log and Deviation Log at the end of every session.
+- Existing tests must keep passing. Current baseline: 130.
+- At the end of every session, update all four together, in one pass, not
+  whichever one happens to be open: the handoff's Current state block
+  (Section 1) and Deviation Log (Section 10), and the roadmap's Current
+  State block and Project Log. A Current State block left stale while
+  history moves on elsewhere is exactly the drift this rule exists to
+  prevent.
 - Do not reason about the dissertation, word counts, or the presentation.
   This repo is the build only.
 - Never hardcode an expected value in verification code. If you are measuring

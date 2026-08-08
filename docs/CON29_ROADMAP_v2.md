@@ -29,98 +29,62 @@
 ```
 Version:       2.0 (major architecture revision from v1.0)
 Phase:         IN PROGRESS
-Last updated:  2026-08-03
-Active sprint: Sprint 2 — GIS Agent & Document Agent. GIS Agent (§A) built and
-               tested. Document Agent (§B: pdf_extractor.py, llm_extractor.py)
-               and session_store.py not yet started. Test property set (§C)
-               not yet locked. con29_registry.py rebuilt against a real
-               exemplar (out-of-band with §A/§B/§C, see below) — required
-               reading before Sprint 3's CON29 Mapper starts.
+Last updated:  2026-08-07
+Authority:     CON29_BUILD_HANDOFF.md is build-track authority as of
+               2026-08-05 — read it, not just this file, before writing code
+               or making an architectural decision. It supersedes this
+               roadmap in the three places it marks SUPERSEDES (Sprint 1's
+               closure criterion, the coverage targets, and the Bucket 2
+               planning-register assumption); this roadmap still governs
+               everywhere else.
+Current position: WP-01 (src/models.py) and WP-02 (DEF-02, DEF-03, DEF-04,
+               DEF-09) complete, 2026-08-06. WP-03 (wire the GIS agent —
+               DEF-01, DEF-05, DEF-06, DEF-07, including the first live
+               Hackney WFS call) is next. Sprint 1's own closure question,
+               posed as open in earlier revisions of this block, is
+               resolved — see Handoff Section 2 ("retire the criterion as
+               invalid by construction, do not reopen Sprint 1").
 Blockers:      HMLR LLC1 access — Business Gateway requires an active Business
                e-services account (Basic Auth), not a self-serve API key. No
                public "developer.hmlr.gov.uk" signup exists. Likely resolution
                path: law firm partner's existing Business Gateway account, or
                direct contact via channelpartners@landregistry.gov.uk. Affects
                Bristol LLC1 charges only (Hackney LLC1 fields are already
-               coverage_flag: manual per the Borough B design). Does not block
-               Sprint 2 — src/adapters/hmlr_llc1.py's graceful-degradation
-               stub stays in place until this is resolved.
-Next action:   **con29_registry.py rebuilt 2026-08-02** against a real St
-               Albans CON29R/LLC1 exemplar Griff shared (search ref
-               A/2025/00248) — verbatim official question text throughout,
-               replacing this roadmap's own paraphrases. 63 sub-question
-               entries across 19 confirmed top-level groups, plus 3 real
-               questions (SuDS/drainage, nearby road schemes, nearby railway
-               schemes) held in a separate UNCONFIRMED_NUMBERING list rather
-               than given a guessed question number. See Architecture
-               Decisions & Changes for the full account.
+               coverage_flag: manual per the Borough B design). Does not
+               block other work — src/adapters/hmlr_llc1.py's
+               graceful-degradation stub stays in place until this is
+               resolved.
 
-               **ARCHITECTURE-AFFECTING DISCOVERY — RESOLVED 2026-08-03:**
-               the real form puts tree preservation orders at 3.9(m), not a
-               standalone "3.7" (real 3.7 is "Outstanding Notices"). Article
-               4 directions have no standalone CON29 Part 1 question number
-               in the real form at all (plausibly LLC1-register-sourced
-               instead — Part 1 LLC1 charge under the Local Land Charges
-               Rules 1977). Both `gis_agent.py` and `planning_agent.py`
-               have now been corrected to match: TPO references changed
-               "3.7" -> "3.9m"; Article 4 moved out of each module's
-               `DATASET_TO_QUESTIONS` into a new `NON_CON29_DATASETS` dict
-               (still queried — real, useful evidence-manifest data — just
-               no longer claimed to answer a CON29 question). Enforcement
-               notices, previously mis-mapped to "1.1g", are now correctly
-               "3.9a"; real 1.1g ("a heritage partnership agreement") is
-               left honestly uncovered rather than force-mapped to a
-               dataset that doesn't really answer it.
+               DEF-01: gis_agent.py's results still never reach
+               PropertyRecord — normalise() doesn't accept a GisDataResult
+               parameter. Everything gis_agent.py retrieves (Hackney
+               conservation area, Part 2A contaminated land, brownfield
+               register, both boroughs' TPO) has nowhere to land. WP-03's
+               first item.
 
-               `planning_agent.py`'s query loop was iterating
-               `DATASET_TO_QUESTIONS` directly to decide what to fetch —
-               moving Article 4 out of that dict would have silently
-               stopped querying it. Fixed by introducing `ALL_DATASETS`
-               (the union of `DATASET_TO_QUESTIONS` and
-               `NON_CON29_DATASETS`) and querying that instead, so Article
-               4 data keeps flowing. `gis_agent.py` was already safe here —
-               its query calls are hardcoded per-dataset, not
-               dict-iteration-driven.
+               Hackney WFS assumptions unverified against a real call:
+               DEF-06 (HACKNEY_GEOM_FIELD, still a guess), DEF-07 (WFS 2.0
+               sent with the WFS 1.x typeName parameter, plus the CQL
+               EWKT filter and metre-unit DWITHIN against a natively
+               27700 layer). No Hackney WFS call has ever been made by
+               this code — WP-03's first live call is the opening act,
+               not a later validation step.
 
-               **A REAL, HONEST REGRESSION SURFACED BY THIS FIX:**
-               `scripts/tally_sprint1_coverage.py`'s own hardcoded group
-               table had the same wrong IDs baked in (a standalone "3.7"
-               group, "1.1h-i Article 4", a mislabeled "3.6 Outstanding
-               notices", a nonexistent "3.2"). Correcting them drops the
-               tally from 10 architectural / 8 functional groups to 8 / 6 —
-               Sprint 1's own "at least 10 groups" success criterion,
-               reported met at Sprint 1's closure, **is no longer met** with
-               the corrected IDs. This is not a loss of functionality — the
-               same adapters make the same real API calls either way — it's
-               a correction to what those calls were honestly claimed to
-               answer. Flagged here and in Architecture Decisions rather
-               than silently patched to keep the old claim looking true.
-               Worth a direct conversation with Griff about whether Sprint
-               1's closure needs revisiting, separate from continuing
-               Sprint 2.
+               organisation-entity — the field property_resolver.py's
+               Borough resolver reads off local-authority-district
+               entities — is confirmed on planning.data.gov.uk's
+               brownfield-land dataset (Bristol=66, Hackney=163) but not
+               yet confirmed on local-authority-district's own response
+               shape. Flagged as a WP-03 verification item in Handoff
+               Section 7, with the exact curl call ready — not yet run.
 
-               Also reassessed: the roadmap's own "28+ question groups"
-               Sprint 0 target may have been an overestimate for CON29 Part
-               1 alone — the real form's Part 1 tops out around 19-22
-               top-level groups; reaching "28+" might require CON29O
-               (optional enquiries), a separate form this exemplar doesn't
-               include.
-
-               DescribeFeatureType schema call (for the Hackney
-               HACKNEY_GEOM_FIELD gap flagged last session) returned only a
-               wrapper document with two unfollowed `xsd:import`s — real,
-               but inconclusive. Two follow-up URLs given to Griff; gap
-               stays open. Two remaining concrete API-fixture moves
-               (Historic England `/query` body, a first Gemini/Groq call)
-               deferred by mutual agreement to continue with the rest of
-               Sprint 2 first.
-
-               NEXT: Sprint 2 §B — Document Agent (pdf_extractor.py using
-               PyMuPDF, llm_extractor.py — the first real Gemini call this
-               project makes) and §C's session_store.py. Test property set
-               (§C) still needs locking with the law firm partner before
-               Sprint 3 — a hard gate per this roadmap's own rules, do not
-               proceed past it without that confirmation.
+               Test property set (§C) not locked with the law firm partner
+               — a hard gate before Sprint 3 per this roadmap's own rules.
+               Two UPRNs used as resolver test fixtures are confirmed
+               unsuitable as locked candidates (one commercial, one a
+               non-existent house number) — see Handoff Section 7, WP-11.
+Next action:   WP-03. See CON29_BUILD_HANDOFF.md Section 7 for its exact
+               scope and acceptance criteria.
 ```
 
 ---
@@ -1376,6 +1340,18 @@ demo.launch()
 ---
 
 ## Troubleshooting Log
+
+Scope, added 2026-08-07 to give this log a stated boundary against the
+handoff's Deviation Log (`CON29_BUILD_HANDOFF.md` Section 10), which has
+overlapping intent and no boundary was what produced the rule-5 error
+corrected the same day: this log is for issues discovered **while building
+against a live source** (a real API/response not behaving as assumed,
+found via an actual call). The handoff's Deviation Log is for discrepancies
+against the handoff document itself, **and for defects found while
+executing against it** (a figure, claim, or docstring tested and found
+wrong; a bug a test run surfaces during that work) — that second half is
+what most of that log has actually held so far. Overlap is possible — flag
+either way rather than picking the wrong one and leaving nothing findable.
 
 | Date | Issue | Resolution |
 |---|---|---|
